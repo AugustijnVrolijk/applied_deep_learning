@@ -1,0 +1,23 @@
+Objective: Implement specific regularization techniques from basic tensor operations to 
+improve model robustness.
+
+2.1 Technical Requirements
+- From-Scratch Components: You must implement these using only basic tensor/math operations:
+    1. Custom MixUp: A function that blends input image pairs and labels using 𝜆~𝐵𝑒𝑡𝑎(𝛼, 𝛼).
+    2. Label Smoothing: A custom Cross-Entropy loss function that converts hard 1.0/0.0 targets
+       into soft targets.
+- train.py:
+    1. Train a model incorporating both MixUp and Label Smoothing.
+    2. Implement validation-based early stopping manually to prevent overfitting.
+    3. Save the final model.
+- task.py:
+    1. Evaluate the model on a Noisy Test Set (add random Gaussian noise to inputs) to test
+       representation robustness.
+    2. Save robustness_demo.png showing a montage of 16 images processed by your MixUp
+       logic.
+
+2.2 Technical Justification (Terminal Output)
+    Print a report (~500 words) explaining the theoretical reason why MixUp prevents "memorization" of
+training samples. Defend your Label Smoothing implementation: how does reducing label "hardness"
+prevent overshooting during optimization? Additional quantitative results could be included to support
+your points.

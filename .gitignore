@@ -1,0 +1,18 @@
+# datasets
+data/
+datasets/
+*.tar.gz
+*.zip
+
+# training artefacts
+checkpoints/
+runs/
+outputs/
+*.pt
+*.pth
+*.ckpt
+
+# python
+__pycache__/
+*.pyc
+.venv/
