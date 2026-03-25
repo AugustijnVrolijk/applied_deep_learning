@@ -11,6 +11,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from network import Net
 
+from typing import Tuple
 
 #print(torch.cuda.is_available()) sanity checks it was running on my GPU
 #print(torch.cuda.device_count())
@@ -139,8 +140,36 @@ def draw_accuracy_plot(
     img.save(save_path)
     print(f"Saved plot to {save_path}")    
 
-def make_dataloaders(batch_size, use_cuda):
-    # setup dataloaders
+def config_cuda() -> Tuple[torch.device, bool]:
+    """
+    Helper function which checks if CUDA is available and returns the appropriate device and a boolean flag for use_cuda,
+    which can be used for pin_memory in dataloaders and non_blocking transfers to GPU
+    
+    inputs: None
+
+    outputs: device (torch.device),
+             use_cuda (bool)
+    """
+    use_cuda = torch.cuda.is_available()
+    if use_cuda:
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
+
+    print(f"Using device: {device}")
+    return device, use_cuda
+
+def make_dataloaders(batch_size: int, use_cuda: bool) -> Tuple[DataLoader, DataLoader]:
+    """
+    Setup dataloaders for training and validation.
+    This function loads the CIFAR-100 training dataset, applies transformations, splits it into training and validation sets,
+
+    inputs: batch_size (int)
+            use_cuda (bool)
+
+    outputs: train_loader (DataLoader)
+             val_loader (DataLoader)
+    """
     transform = transforms.Compose(
         [transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
@@ -158,17 +187,16 @@ def make_dataloaders(batch_size, use_cuda):
 
     return train_loader, val_loader
 
-def config_cuda():
-    use_cuda = torch.cuda.is_available()
-    if use_cuda:
-        device = torch.device("cuda")
-    else:
-        device = torch.device("cpu")
+def setup_model(device: torch.device) -> Tuple[Net, torch.nn.CrossEntropyLoss, optim.SGD]:
+    """
+    loads the neural network, loss function, and optimizer.
+    
+    inputs: device (torch.device)
 
-    print(f"Using device: {device}")
-    return device, use_cuda
-
-def setup_model(device):
+    outputs: net (Net) 
+             criterion (torch.nn.CrossEntropyLoss)
+             optimizer (optim.SGD)
+    """
     net = Net().to(device)
     ## loss and optimiser
     criterion = torch.nn.CrossEntropyLoss()
@@ -176,9 +204,25 @@ def setup_model(device):
 
     return net, criterion, optimizer
 
-def train_epoch(net, train_loader, criterion, optimizer, device, use_cuda):
-    # training, so we need to track gradients for backpropagation
-    #
+def train_epoch(net: Net, 
+                train_loader: DataLoader, 
+                criterion: torch.nn.CrossEntropyLoss, 
+                optimizer: optim.SGD, 
+                device: torch.device, 
+                use_cuda: bool) -> float:
+    """
+    trains the model for one epoch, iterating over the training dataloader, and returns the average training loss for that epoch
+    
+    inputs: net (Net)
+            train_loader (DataLoader)
+            criterion (torch.nn.CrossEntropyLoss)
+            optimizer (optim.SGD)
+            device (torch.device)
+            use_cuda (bool)
+
+    outputs: train_loss_normal (float)
+    """
+    
     # setup loss tracking, and iter count to normalise at the end
     net.train()
     training_loss = 0.0
@@ -188,7 +232,7 @@ def train_epoch(net, train_loader, criterion, optimizer, device, use_cuda):
         inputs, labels = data
         inputs, labels = inputs.to(device, non_blocking=use_cuda), labels.to(device, non_blocking=use_cuda) # for GPU
         # zero the parameter gradients
-        optimizer.zero_grad(set_to_none=True)
+        optimizer.zero_grad(set_to_none=True) 
 
         # forward + backward + optimize
         outputs = net(inputs)
@@ -202,7 +246,22 @@ def train_epoch(net, train_loader, criterion, optimizer, device, use_cuda):
     train_loss_normal = training_loss / n_iter
     return train_loss_normal
         
-def validate_epoch(net, val_loader, criterion, device, use_cuda):
+def validate_epoch(net: Net, 
+                   val_loader: DataLoader, 
+                   criterion: torch.nn.CrossEntropyLoss, 
+                   device: torch.device, 
+                   use_cuda: bool) -> float:
+    """
+    validates the model for one epoch, iterating over the validation dataloader, and returns the average validation loss for that epoch
+
+    inputs: net (Net)
+            val_loader (DataLoader)
+            criterion (torch.nn.CrossEntropyLoss)
+            device (torch.device)
+            use_cuda (bool)
+    
+    outputs: validation_loss_normal (float)
+    """
     # Validation no training so we don't need to track gradients  
     # 
     # setup loss tracking, and iter count to normalise at the end
@@ -223,11 +282,32 @@ def validate_epoch(net, val_loader, criterion, device, use_cuda):
     validation_loss_normal = validation_loss / n_iter
     return validation_loss_normal
 
-def train_model(epochs, patience, train_loader, val_loader, net, criterion, optimizer, device, use_cuda):
+def train_model(epochs: int, 
+                patience: int, 
+                train_loader: DataLoader, 
+                val_loader: DataLoader, 
+                net: Net, 
+                criterion: torch.nn.CrossEntropyLoss, 
+                optimizer: optim.SGD, 
+                device: torch.device, 
+                use_cuda: bool) -> Tuple[list, list]:
     """
-     main training loop:
-        iterates over epochs, and calls train_epoch and validate_epoch,
-        while also implementing early stopping based on validation loss
+    trains the model for a specified number of epochs, while also performing validation at the end of each epoch
+    implements early stopping based on validation loss with a specified patience. 
+    It also tracks training and validation loss over epochs for plotting later.
+
+    inputs: epochs (int)
+            patience (int)
+            train_loader (DataLoader)
+            val_loader (DataLoader)
+            net (Net)
+            criterion (torch.nn.CrossEntropyLoss)
+            optimizer (optim.SGD)
+            device (torch.device)
+            use_cuda (bool)
+
+    outputs: train_loss (list of float)
+             val_loss (list of float)
     """
     # setup early stopping tracking variables
     best_val_loss = float('inf')
@@ -261,7 +341,9 @@ def train_model(epochs, patience, train_loader, val_loader, net, criterion, opti
     return train_loss, val_loss
 
 if __name__ == '__main__':
-    ## cifar-100 dataset
+    """
+    main execution block, sets up hyperparameters, dataloaders, model, and starts training, while also plotting the accuracy curves at the end
+    """
 
     batch_size = 128
     epochs = 100
