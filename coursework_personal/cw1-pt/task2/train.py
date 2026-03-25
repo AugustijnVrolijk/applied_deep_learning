@@ -139,15 +139,7 @@ def draw_accuracy_plot(
     img.save(save_path)
     print(f"Saved plot to {save_path}")    
 
-if __name__ == '__main__':
-    ## cifar-100 dataset
-
-    batch_size = 128
-    epochs = 100
-    patience = 3
-
-    use_cuda = torch.cuda.is_available()
-
+def make_dataloaders(batch_size, use_cuda):
     # setup dataloaders
     transform = transforms.Compose(
         [transforms.ToTensor(),
@@ -164,69 +156,96 @@ if __name__ == '__main__':
     train_loader = DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=use_cuda)
     val_loader = DataLoader(valset, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=use_cuda)
 
-    # setup model and device
-    device = torch.device("cuda" if use_cuda else "cpu")
+    return train_loader, val_loader
+
+def config_cuda():
+    use_cuda = torch.cuda.is_available()
+    if use_cuda:
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
+
     print(f"Using device: {device}")
+    return device, use_cuda
 
+def setup_model(device):
     net = Net().to(device)
-
     ## loss and optimiser
     criterion = torch.nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=0.01, momentum=0.9)
 
+    return net, criterion, optimizer
 
+def train_epoch(net, train_loader, criterion, optimizer, device, use_cuda):
+    # training, so we need to track gradients for backpropagation
+    #
+    # setup loss tracking, and iter count to normalise at the end
+    net.train()
+    training_loss = 0.0
+    n_iter = 0
+    for data in train_loader: # train_loader is an iterable itself
+        # get the inputs; data is a list of [inputs, labels]
+        inputs, labels = data
+        inputs, labels = inputs.to(device, non_blocking=use_cuda), labels.to(device, non_blocking=use_cuda) # for GPU
+        # zero the parameter gradients
+        optimizer.zero_grad(set_to_none=True)
+
+        # forward + backward + optimize
+        outputs = net(inputs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+
+        training_loss += loss.item()
+        n_iter += 1
+
+    train_loss_normal = training_loss / n_iter
+    return train_loss_normal
+        
+def validate_epoch(net, val_loader, criterion, device, use_cuda):
+    # Validation no training so we don't need to track gradients  
+    # 
+    # setup loss tracking, and iter count to normalise at the end
+    net.eval()
+    validation_loss = 0.0  
+    n_iter = 0
+    with torch.no_grad(): # disable gradient tracking for validation  
+        for data in val_loader: # val_loader is also an iterable 
+            inputs, labels = data
+            inputs, labels = inputs.to(device, non_blocking=use_cuda), labels.to(device, non_blocking=use_cuda) # for GPU
+
+            outputs = net(inputs)
+            loss = criterion(outputs, labels)
+
+            validation_loss += loss.item()
+            n_iter += 1
+
+    validation_loss_normal = validation_loss / n_iter
+    return validation_loss_normal
+
+def train_model(epochs, patience, train_loader, val_loader, net, criterion, optimizer, device, use_cuda):
+    """
+     main training loop:
+        iterates over epochs, and calls train_epoch and validate_epoch,
+        while also implementing early stopping based on validation loss
+    """
+    # setup early stopping tracking variables
     best_val_loss = float('inf')
     epochs_no_improve = 0
+    min_delta = 1e-4
 
+    # setup lists to track training and validation loss over epochs for plotting later
     train_loss = []
     val_loss = []
-    ## train
+    # train
     for epoch in range(epochs):  # loop over the dataset multiple times
         print(f"Epoch {epoch+1}/{epochs}")
 
-        # setup loss tracking, and iter count to normalise at the end
-        net.train()
-        training_loss = 0.0
-        n_iter = 0
-        for data in train_loader: # train_loader is an iterable itself
-            # get the inputs; data is a list of [inputs, labels]
-            inputs, labels = data
-            inputs, labels = inputs.to(device, non_blocking=use_cuda), labels.to(device, non_blocking=use_cuda) # for GPU
-            # zero the parameter gradients
-            optimizer.zero_grad(set_to_none=True)
+        training_loss = train_epoch(net, train_loader, criterion, optimizer, device, use_cuda)
+        train_loss.append(training_loss)
 
-            # forward + backward + optimize
-            outputs = net(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-
-            training_loss += loss.item()
-            n_iter += 1
-
-        train_loss.append(training_loss / n_iter)
-
-        # Validation loop, no training so we don't need to track gradients  
-        # 
-        # setup loss tracking, and iter count to normalise at the end
-        net.eval()
-        validation_loss = 0.0  
-        n_iter = 0
-        with torch.no_grad(): # disable gradient tracking for validation  
-            for data in val_loader: # val_loader is also an iterable 
-                inputs, labels = data
-                inputs, labels = inputs.to(device, non_blocking=use_cuda), labels.to(device, non_blocking=use_cuda) # for GPU
-
-                outputs = net(inputs)
-                loss = criterion(outputs, labels)
-
-                validation_loss += loss.item()
-                n_iter += 1
-
-        val_loss.append(validation_loss / n_iter)
-
-
-        min_delta = 1e-4
+        validate_loss = validate_epoch(net, val_loader, criterion, device, use_cuda)
+        val_loss.append(validate_loss)
 
         if val_loss[-1] < best_val_loss - min_delta:
             best_val_loss = val_loss[-1]
@@ -238,6 +257,20 @@ if __name__ == '__main__':
         if epochs_no_improve >= patience:
             print(f"Early stopping at epoch {epoch+1}")
             break   
+
+    return train_loss, val_loss
+
+if __name__ == '__main__':
+    ## cifar-100 dataset
+
+    batch_size = 128
+    epochs = 100
+    patience = 3
+
+    device, use_cuda = config_cuda()
+    train_loader, val_loader = make_dataloaders(batch_size, use_cuda)
+    net, criterion, optimizer = setup_model(device)
+    train_loss, val_loss = train_model(epochs, patience, train_loader, val_loader, net, criterion, optimizer, device, use_cuda)
 
     print('Training done.')
 
