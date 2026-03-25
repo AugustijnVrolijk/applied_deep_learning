@@ -131,6 +131,7 @@ def draw_accuracy_plot(
     img.save(save_path)
     print(f"Saved plot to {save_path}")    
 
+
 if __name__ == '__main__':
     ## cifar-10 dataset
     transform = transforms.Compose(
