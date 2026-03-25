@@ -5,13 +5,14 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 import torch.optim as optim
+import numpy as np
 
 from torch.utils.data import random_split, DataLoader
 from PIL import Image, ImageDraw, ImageFont
 
 from network import Net
 
-from typing import Tuple
+from typing import Tuple, Union
 
 #print(torch.cuda.is_available()) sanity checks it was running on my GPU
 #print(torch.cuda.device_count())
@@ -204,6 +205,81 @@ def setup_model(device: torch.device) -> Tuple[Net, torch.nn.CrossEntropyLoss, o
 
     return net, criterion, optimizer
 
+def softmax(logits:torch.Tensor) -> torch.Tensor:
+    """
+    softmax is a helper function to compute the softmax of a vector or batch of vectors
+    apparently unstable for small values, so we subtract the max for numerical stability, as is common practice
+    but this can still lead to underflow for very small values
+
+    inputs: logits (torch.Tensor)
+
+    outputs: softmaxed_x (torch.Tensor)
+    """
+
+    # subtract max for numerical stability
+    x_max = torch.max(logits, dim=-1, keepdim=True).values
+    e_x = torch.exp(logits - x_max)
+    softmaxed_x = e_x / e_x.sum(dim=-1, keepdim=True)
+    
+    return softmaxed_x
+    
+def log_softmax(logits:torch.Tensor) -> torch.Tensor:
+    """
+    log_softmax omputes the log softmax of a vector or batch of vectors
+    this is more numerically stable than taking the log of the softmax, and is what is used in the cross entropy loss implementation in PyTorch
+
+    inputs: logits (torch.Tensor)
+
+    outputs: log_softmaxed_x (torch.Tensor)
+    """
+
+    # taken from https://stackoverflow.com/questions/61567597/how-is-log-softmax-implemented-to-compute-its-value-and-gradient-with-better
+    # used both max shifting and the log-sum-exp trick for numerical stability, but this can still underflow for very small values
+    # subtract max for numerical stability
+
+    """
+    c = x.max()
+    logsumexp = np.log(np.exp(x - c).sum())
+    return x - c - logsumexp
+    """
+    # shifted_logits is identical to (x-c)
+    shifted_logits = logits - logits.max(dim=-1, keepdim=True).values
+    log_sum_exp = torch.log(torch.sum(torch.exp(shifted_logits), dim=-1, keepdim=True))
+    return shifted_logits - log_sum_exp
+
+def soft_cross_entropy(outputs: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    """
+    soft_cross_entropy is a helper function to compute the cross entropy loss given the model outputs and true labels
+    !!!this is HARDCODED for a classification, i.e. expects outputs to be of shape (batch_size, num_classes)!!!
+
+    inputs: outputs (torch.Tensor)
+            labels (torch.Tensor)
+
+    outputs: loss (float)
+    
+    cross entropy loss is:
+    
+    -1/i * sum_i[ sum_j[ t_ij * log(p_ij) ] ]
+
+    where i is the number of batches, j the number of classes, t_ij is the true label (one-hot encoded)
+    and p_ij is the predicted probability for class j in batch i
+
+    p_ij is given by the softmax of the outputs, but we can compute the log of the softmax more stably
+    using the log_softmax function defined above, which combines the softmax and log in a more numerically
+    stable way
+    
+    Then we just need to multiply the log softmax outputs by the one-hot encoded labels and take the mean
+    over batches to get the loss
+    """
+    
+    log_probs = log_softmax(outputs)
+
+    loss_per_sample = -(labels * log_probs).sum(dim=-1) # tensor operations effectively do the sum over classes
+                                                        # for each sample in the batch, giving us a tensor of shape (batch_size,) 
+                                                        # need to be careful to do dim -1 so it applies over the classes and not the batch dimension
+
+    return loss_per_sample.mean()
+
 def train_epoch(net: Net, 
                 train_loader: DataLoader, 
                 criterion: torch.nn.CrossEntropyLoss, 
@@ -236,6 +312,7 @@ def train_epoch(net: Net,
 
         # forward + backward + optimize
         outputs = net(inputs)
+        soft_cross_entropy(outputs, labels) # placeholder for where you would implement the soft cross entropy loss if you choose to do the extra credit
         loss = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
