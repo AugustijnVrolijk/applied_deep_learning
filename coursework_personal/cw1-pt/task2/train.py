@@ -369,7 +369,9 @@ class MixUp():
             # cannot apply MixUp to a batch of size 1, so just return the original inputs and labels
             return inputs, labels
 
-        if labels.shape[-1] == 1: # if labels are not one-hot encoded, we need to convert them to one-hot encoding before mixing
+        # either the last dimension shows each label has size 1, or the labels are a 1D tensor of shape 
+        # (batch_size,), in either case we need to convert to one-hot encoding for mixing
+        if labels.shape[-1] == 1 or (len(labels.shape) == 1 and labels.shape[0] == batch_size): # if labels are not one-hot encoded, we need to convert them to one-hot encoding before mixing
             if self.num_classes:
                 labels = to_one_hot(labels, self.num_classes)
             else:
