@@ -1,37 +1,59 @@
 # training script
 # adapted from: https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html
+#
+#
+# Gen AI usage statement:
+#
+# Gen AI was used to create the draw_accuracy_plot function, which is not the main focus of the assignment
+# It was also used to help generate typehints and docstrings for functions, which were after validated by me
+# The main training loop, logic and functions were written by me, however Gen AI was used to help understand
+# the structure of Pytorch, i.e. understanding loss.backward(), requires the criterion function to return
+# a tensor object, rather than just performing the math and returning a scalar. It also helped with guidance
+# regarding implementing CUDA friendly code to speed up training on my machine, such as getting a device parameter
+# and smaller details like non_blocking transfers. 
+
 
 import torch
 import torchvision
 import torchvision.transforms as transforms
 import torch.optim as optim
-import numpy as np
 
 from torch.utils.data import random_split, DataLoader
 from PIL import Image, ImageDraw, ImageFont
 
 from network import Net
 
-from typing import Tuple, Union
+from typing import Tuple
 
-#print(torch.cuda.is_available()) sanity checks it was running on my GPU
+# sanity checks to make sure my GPU was being used
+#print(torch.cuda.is_available())
 #print(torch.cuda.device_count())
 #print(torch.cuda.current_device())
 #print(torch.cuda.device(0))
 #print(torch.cuda.get_device_name(0))
 
-
 def draw_accuracy_plot(
-    train_acc,
-    val_acc,
-    save_path="accuracy_plot.png",
-    width=1000,
-    height=700,
-    title="Training and Validation Accuracy"):
+    train_acc: list[float],
+    val_acc: list[float],
+    save_path: str="accuracy_plot.png",
+    width: int=1000,
+    height: int=700,
+    title: str="Training and Validation Accuracy") -> None:
     """
     draw_accuracy_plot creates a line plot of training and validation accuracy over epochs and saves it as an image using Pillow
     
     This function was primarily created with AI assistance, and is not the main focus of the assignment
+
+    inputs:
+        train_acc (list of float): list of training accuracies for each epoch
+        val_acc (list of float): list of validation accuracies for each epoch
+        save_path (str): path to save the generated plot image
+        width (int): width of the generated image in pixels
+        height (int): height of the generated image in pixels
+        title (str): title of the plot
+    
+    outputs:
+        None (saves the plot as an image to the specified path)
     """
 
     if len(train_acc) != len(val_acc):
@@ -282,6 +304,87 @@ class soft_cross_entropy_loss(torch.nn.Module):
         """
         return self.soft_cross_entropy(outputs, labels)
 
+class MixUp():
+    """
+    MixUp data augmentation technique for training neural networks
+    MixUp creates new training samples by taking convex combinations of pairs of examples and their labels.
+    
+    """
+    def __init__(self, alpha: float = 1.0, num_classes: int = None):
+        """
+        Initialize the MixUp data augmentation technique.
+
+        inputs:
+            alpha (float): The alpha parameter for the Beta distribution used to sample the mixing coefficient.
+            num_classes (int): The number of classes in the classification task, needed for one-hot encoding of labels when applying MixUp to labels.
+        
+        outputs:
+            Mixup object that can be called to apply MixUp augmentation to a batch of inputs and labels
+        """
+
+        if alpha <= 0:
+            raise ValueError("alpha must be greater than 0 for MixUp")
+        
+        self.alpha = alpha
+        self.num_classes = num_classes
+
+    def sample_beta(self) -> torch.Tensor:
+        """
+        sample_beta samples a mixing coefficient lambda from a Beta distribution parameterized by alpha, as recommended in the original MixUp paper
+        use Gamma sampling, since Beta can be sampled by sampling two Gamma distributions and taking the ratio
+        
+        Finding more primitive methods to replace torch.distributions.Beta or .Gamma become harder, and need specialised algorithms
+        or rejection sampling.
+
+        inputs: None
+
+        outputs: lam (torch.Tensor) - a mixing coefficient sampled from the Beta distribution, constrained to be in [0.5, 1] to avoid too much mixing
+
+        """
+        gamma1 = torch.distributions.Gamma(self.alpha, 1.0).sample()
+        gamma2 = torch.distributions.Gamma(self.alpha, 1.0).sample()
+
+        lam = gamma1 / (gamma1 + gamma2)
+
+        # ensure lambda is in [0.5, 1] to avoid too much mixing, as recommended in the original MixUp paper
+        # specifically, each image is seen at least once with a weight of 0.5 or more, to preserve some of the original
+        # image information and prevent underfitting
+        return max(lam, 1 - lam) 
+
+    def __call__(self, inputs: torch.Tensor, labels: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Apply MixUp augmentation to a batch of inputs and labels.
+
+        inputs:
+            inputs (torch.Tensor): A batch of input data, expected to be of shape (batch_size, channels, height, width)
+            labels (torch.Tensor): A batch of labels, expected to be of shape (batch_size,)
+
+        outputs:
+            inputs (torch.Tensor): A batch of mixed input data, expected to be of shape (batch_size, channels, height, width)
+            labels (torch.Tensor): A batch of mixed labels, expected to be of shape (batch_size, num_classes)
+        """
+        batch_size = inputs.size(0)
+
+        if batch_size < 2:
+            # cannot apply MixUp to a batch of size 1, so just return the original inputs and labels
+            return inputs, labels
+
+        if labels.shape[-1] == 1: # if labels are not one-hot encoded, we need to convert them to one-hot encoding before mixing
+            if self.num_classes:
+                labels = to_one_hot(labels, self.num_classes)
+            else:
+                raise ValueError("num_classes must be specified for MixUp when labels are not already one-hot encoded")
+
+        lambda_param = self.sample_beta() # sample a lambda for each example in the batch
+        permutation = torch.randperm(batch_size) # generate a random permutation of the batch indices to mix
+
+
+        mixed_inputs = lambda_param * inputs + (1 - lambda_param) * inputs[permutation] # mix the inputs according to the permutation and lambda
+        mixed_labels = lambda_param * labels + (1 - lambda_param) * labels[permutation] # mix the labels according to the same permutation and lambda
+
+        return mixed_inputs, mixed_labels
+
+
 def config_cuda() -> Tuple[torch.device, bool]:
     """
     Helper function which checks if CUDA is available and returns the appropriate device and a boolean flag for use_cuda,
@@ -335,6 +438,7 @@ def train_epoch(net: Net,
                 train_loader: DataLoader, 
                 criterion: torch.nn.CrossEntropyLoss, 
                 optimizer: optim.SGD, 
+                mixup: MixUp,
                 device: torch.device, 
                 use_cuda: bool) -> float:
     """
@@ -344,6 +448,7 @@ def train_epoch(net: Net,
             train_loader (DataLoader)
             criterion (torch.nn.CrossEntropyLoss)
             optimizer (optim.SGD)
+            mixup (MixUp)
             device (torch.device)
             use_cuda (bool)
 
@@ -355,14 +460,18 @@ def train_epoch(net: Net,
     training_loss = 0.0
     n_iter = 0
     for data in train_loader: # train_loader is an iterable itself
+        
         # get the inputs; data is a list of [inputs, labels]
         inputs, labels = data
+        inputs, labels = mixup(inputs=inputs, labels=labels) # apply MixUp augmentation to the inputs and labels
+
         inputs, labels = inputs.to(device, non_blocking=use_cuda), labels.to(device, non_blocking=use_cuda) # for GPU
         # zero the parameter gradients
         optimizer.zero_grad(set_to_none=True) 
 
         # forward + backward + optimize
         outputs = net(inputs)
+        # criterion itself performs label smoothing if provided as an argument to the instance
         loss = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
@@ -416,6 +525,7 @@ def train_model(epochs: int,
                 net: Net, 
                 criterion: torch.nn.CrossEntropyLoss, 
                 optimizer: optim.SGD, 
+                mixup: MixUp,
                 device: torch.device, 
                 use_cuda: bool) -> Tuple[list, list]:
     """
@@ -430,6 +540,7 @@ def train_model(epochs: int,
             net (Net)
             criterion (torch.nn.CrossEntropyLoss)
             optimizer (optim.SGD)
+            mixup (MixUp)
             device (torch.device)
             use_cuda (bool)
 
@@ -448,7 +559,7 @@ def train_model(epochs: int,
     for epoch in range(epochs):  # loop over the dataset multiple times
         print(f"Epoch {epoch+1}/{epochs}")
 
-        training_loss = train_epoch(net, train_loader, criterion, optimizer, device, use_cuda)
+        training_loss = train_epoch(net, train_loader, criterion, optimizer, mixup, device, use_cuda)
         train_loss.append(training_loss)
 
         validate_loss = validate_epoch(net, val_loader, criterion, device, use_cuda)
@@ -473,19 +584,29 @@ if __name__ == '__main__':
     """
 
     batch_size = 128
-    epochs = 100
-    patience = 3
-    smoothing_factor = 0.1
+    epochs = 100 
+    patience = 3 # for early stopping, if validation loss does not improve for this many epochs, stop training
+
+    learning_rate = 0.01 # for SGD
+    momentum = 0.9 # for SGD
+
+    smoothing_factor = 0.1 # for label smoothing
+    alpha = 0.4 # for mixup
 
     device, use_cuda = config_cuda()
     train_loader, val_loader, n_classes = make_dataloaders(batch_size, use_cuda)
     
     net = Net().to(device)
-    ## loss and optimiser
-    criterion = soft_cross_entropy_loss(n_classes, smoothing_factor)
-    optimizer = optim.SGD(net.parameters(), lr=0.01, momentum=0.9)    
+
     
-    train_loss, val_loss = train_model(epochs, patience, train_loader, val_loader, net, criterion, optimizer, device, use_cuda)
+    # custom mixup implementation, with specified alpha and number of classes for one-hot encoding
+    mixup = MixUp(alpha=alpha, num_classes=n_classes) # example of how to initialize MixUp, not currently used in training loop but can be easily integrated by applying it to the inputs and labels in the train_epoch function before the forward pass
+    ## loss and optimiser
+    # Custom soft_cross_entropy_loss function, also implements label smoothing with given smoothing factor
+    criterion = soft_cross_entropy_loss(n_classes, smoothing_factor)
+    optimizer = optim.SGD(net.parameters(), lr=learning_rate, momentum=momentum)    
+    
+    train_loss, val_loss = train_model(epochs, patience, train_loader, val_loader, net, criterion, optimizer, mixup, device, use_cuda)
 
     print('Training done.')
 
