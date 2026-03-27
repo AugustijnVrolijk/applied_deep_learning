@@ -620,3 +620,9 @@ if __name__ == '__main__':
     draw_accuracy_plot(train_loss, val_loss, save_path="accuracy_plot.png")
     # save trained model
     print("Best model saved to best_model.pt")
+
+    DISCUSS 3 THINGS; Memorization stopped with MixUp
+    DEFEND MY LABEL SMOOTHING; for my version its mathematically identical to do before or after MixUp
+    then look at whether it even helped or not, turn label smoothing off and see if it makes a difference,
+    IF NOT THEN MENTION THAT MAYBE MIXUP WAS ALREADY DOING A SIMILAR JOB IN REGULARIZATION, TURNING THE OUTPUT LABELS
+    ALREADY INTO SOFT TARGETS; SO THE LABEL SMOOTHING WASN'T SO USEFUL
