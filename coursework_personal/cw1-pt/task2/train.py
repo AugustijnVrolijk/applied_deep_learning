@@ -468,7 +468,7 @@ def train_epoch(net: Net,
         
         # get the inputs; data is a list of [inputs, labels]
         inputs, labels = data
-        #inputs, labels = mixup(inputs=inputs, labels=labels) # apply MixUp augmentation to the inputs and labels
+        inputs, labels = mixup(inputs=inputs, labels=labels) # apply MixUp augmentation to the inputs and labels
 
         inputs, labels = inputs.to(device, non_blocking=use_cuda), labels.to(device, non_blocking=use_cuda) # for GPU
         # zero the parameter gradients
@@ -594,7 +594,7 @@ if __name__ == '__main__':
     epochs = 100 
     patience = 5 # for early stopping, if validation loss does not improve for this many epochs, stop training
 
-    learning_rate = 0.01 # for SGD
+    learning_rate = 0.005 # for SGD
     momentum = 0.9 # for SGD
 
     smoothing_factor = 0.1 # for label smoothing

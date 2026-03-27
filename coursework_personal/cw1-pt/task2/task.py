@@ -29,15 +29,19 @@ def make_testloader(batch_size: int, use_cuda: bool) -> DataLoader:
 
     return testloader
 
-def evaluate_noisy_testset(
-    net: Net,
-    testloader: DataLoader,
-    device: torch.device,
-    use_cuda: bool,
-    noise_std: float = 0.15,
-) -> float:
+def evaluate_noisy_testset(net: Net,testloader: DataLoader,device: torch.device,use_cuda: bool,noise_std: float = 0.15,) -> float:
     """
     Evaluates classification accuracy on a noisy version of the CIFAR-100 test set.
+    
+    inputs:
+        net (Net): The trained model to evaluate
+        testloader (DataLoader): A DataLoader for the CIFAR-100 test set
+        device (torch.device): The device to run the evaluation on
+        use_cuda (bool): Whether to use CUDA for data loading
+        noise_std (float): The standard deviation of the Gaussian noise to add to the inputs
+
+    outputs:
+        accuracy (float): The classification accuracy on the noisy test set, as a value between
     """
     net.eval()
 
@@ -60,30 +64,18 @@ def evaluate_noisy_testset(
     accuracy = correct / total
     return accuracy
 
-def unnormalise_images(inputs: torch.Tensor) -> torch.Tensor:
-    """
-    Reverses the normalisation:
-        x_norm = (x - 0.5) / 0.5
-    so:
-        x = x_norm * 0.5 + 0.5
-
-    multiplies by 255 to convert to pixel values in [0, 255], and clamps to ensure valid pixel range.
-
-    return inputs in the range [0, 255] as uint8 for saving as images
-    """
-    inputs = inputs * 0.5 + 0.5
-    inputs = torch.clamp(inputs, 0.0, 1.0)
-    return inputs
-
-
-def save_mixup_demo(
-    alpha: float = 0.4
-) -> None:
+def save_mixup_demo(lambda_param: float = 0.4) -> None:
     """
     Saves a 4x4 montage of 16 images after applying MixUp.
 
     Uses the first 16 CIFAR-100 training images so the montage is deterministic
     apart from the sampled MixUp lambda/permutation.
+
+    inputs:
+        lambda_param (float): The mixing coefficient to use for the MixUp augmentation. Should be between 0 and 1
+
+    outputs:
+        None (saves an image file "robustness_demo.png" in the current working directory
     """
     save_path = "robustness_demo.png"
 
@@ -91,12 +83,14 @@ def save_mixup_demo(
     testloader = make_testloader(batch_size=batch_size, use_cuda=False) # just to get the number of classes for MixUp, not actually used for testing here
     
     num_classes = len(testloader.dataset.classes)
-    mixup = MixUp(alpha=alpha, num_classes=num_classes)
+    mixup = MixUp(alpha=0.5, num_classes=num_classes) # alpha is ignored, set determined lambda_param
 
     inputs, labels = next(iter(testloader))
     mixed_inputs, _ = mixup(inputs, labels, lambda_param = 0.4)
 
-    mixed_inputs = unnormalise_images(mixed_inputs) # unnormalise for saving as images
+    # unnormalise the mixed inputs for saving as an image
+    mixed_inputs = mixed_inputs * 0.5 + 0.5
+    mixed_inputs = torch.clamp(mixed_inputs, 0.0, 1.0)
 
     grid = make_grid(
         mixed_inputs,
@@ -110,7 +104,7 @@ def save_mixup_demo(
 
 if __name__ == "__main__":
     batch_size = 128
-    noise_std = 0.15
+    noise_std = 0.05
     model_path = "best_model.pt"
 
     device, use_cuda = config_cuda()
@@ -120,16 +114,8 @@ if __name__ == "__main__":
     net.load_state_dict(state_dict)
 
     testloader = make_testloader(batch_size=batch_size, use_cuda=use_cuda)
+    noisy_accuracy = evaluate_noisy_testset(net=net, testloader=testloader, device=device, use_cuda=use_cuda,noise_std=noise_std,)
 
-    noisy_accuracy = evaluate_noisy_testset(
-        net=net,
-        testloader=testloader,
-        device=device,
-        use_cuda=use_cuda,
-        noise_std=noise_std,
-    )
+    print(f"Noisy test accuracy (std={noise_std:.2f}): {noisy_accuracy * 100:.2f}%")
 
-    print(f"Noisy test accuracy (std={noise_std:.2f}): {noisy_accuracy:.4f}")
-    print(f"Noisy test accuracy: {noisy_accuracy * 100:.2f}%")
-
-    save_mixup_demo(alpha=0.4)
+    save_mixup_demo(lambda_param=0.4)
