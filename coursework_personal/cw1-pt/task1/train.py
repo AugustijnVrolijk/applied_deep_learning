@@ -14,14 +14,17 @@
 
 
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import torchvision
 import torchvision.transforms as transforms
 import torch.optim as optim
 
 from torch.utils.data import random_split, DataLoader
+from torchvision.ops import DropBlock2d
 from PIL import Image, ImageDraw, ImageFont
+from itertools import product
 
-from network import Net
 from typing import Tuple
 
 # sanity checks to make sure my GPU was being used
@@ -30,6 +33,7 @@ from typing import Tuple
 #print(torch.cuda.current_device())
 #print(torch.cuda.device(0))
 #print(torch.cuda.get_device_name(0))  
+# ------------------------------ UTIL ------------------------------- 
 
 def calculate_mean_gap(train_loss: list[float], val_loss: list[float]) -> float:
     """
@@ -49,29 +53,33 @@ def calculate_mean_gap(train_loss: list[float], val_loss: list[float]) -> float:
     mean_gap = total_gap / n_epochs
     return mean_gap
 
-def draw_loss_plot(train_loss: list[float],val_loss: list[float],save_path: str = "loss_plot.png",title: str = "Training vs Validation Loss") -> None:
+def draw_accuracy_comparison_plot(
+    series: list[tuple[str, list[float]]],
+    save_path: str = "generalization_gap.png",
+    title: str = "Training vs Validation Accuracy"
+) -> None:
     """
-    Draw a simple line plot of training and validation loss over epochs using Pillow.
-    This function was generated using gen AI and is only used for visualisation support for the writeup
+    Draw a multi-line accuracy plot using Pillow.
 
     inputs:
-        train_loss: list of training losses for each epoch
-        val_loss: list of validation losses for each epoch
-        save_path: output image path
-        width: image width in pixels
+        series: list of (label, values) tuples, where each values list contains
+                the accuracy for each epoch
+        save_path: path to save the generated PNG
         title: plot title
 
     outputs:
-        None (saves the image to save_path)
+        None
     """
 
-    width = 900
-    height = 600
+    width = 1000
+    height = 650
 
-    if len(train_loss) != len(val_loss):
-        raise ValueError("train_loss and val_loss must have the same length")
+    if len(series) == 0:
+        raise ValueError("series must contain at least one line")
 
-    if len(train_loss) < 2:
+    n_epochs = max(len(values) for _, values in series)
+
+    if n_epochs < 2:
         raise ValueError("Need at least 2 epochs to draw a line plot")
 
     img = Image.new("RGB", (width, height), "white")
@@ -80,22 +88,24 @@ def draw_loss_plot(train_loss: list[float],val_loss: list[float],save_path: str 
 
     # Margins
     left = 80
-    right = 40
-    top = 50
+    right = 220   # more space for a bigger legend
+    top = 60
     bottom = 70
     plot_width = width - left - right
     plot_height = height - top - bottom
 
-    n_epochs = len(train_loss)
+    # Find y-range
+    all_vals = []
+    for _, values in series:
+        all_vals.extend(values)
 
-    all_vals = train_loss + val_loss
     y_min = min(all_vals)
     y_max = max(all_vals)
 
-    # add small padding so lines do not touch borders
-    pad = 0.05 * (y_max - y_min) if y_max > y_min else 0.1
-    y_min -= pad
-    y_max += pad
+    # Add padding
+    pad = 0.05 * (y_max - y_min) if y_max > y_min else 0.02
+    y_min = max(0.0, y_min - pad)
+    y_max = min(1.0, y_max + pad)   # assumes accuracy is in [0, 1]
 
     def x_to_px(epoch: int) -> float:
         return left + (epoch - 1) / (n_epochs - 1) * plot_width
@@ -107,10 +117,10 @@ def draw_loss_plot(train_loss: list[float],val_loss: list[float],save_path: str 
     draw.line((left, top, left, height - bottom), fill="black", width=2)
     draw.line((left, height - bottom, width - right, height - bottom), fill="black", width=2)
 
-    # Title and labels
-    draw.text((width // 2 - 80, 15), title, fill="black", font=font)
+    # Title and axis labels
+    draw.text((width // 2 - 140, 20), title, fill="black", font=font)
     draw.text((width // 2 - 20, height - 30), "Epoch", fill="black", font=font)
-    draw.text((15, (top/2)), "Loss", fill="black", font=font)
+    draw.text((15, height // 2), "Accuracy", fill="black", font=font)
 
     # Y ticks
     n_y_ticks = 5
@@ -120,35 +130,48 @@ def draw_loss_plot(train_loss: list[float],val_loss: list[float],save_path: str 
         y = y_to_px(y_val)
 
         draw.line((left, y, width - right, y), fill=(220, 220, 220), width=1)
-        draw.text((45, y - 7), f"{y_val:.2f}", fill="black", font=font)
+        draw.text((30, y - 7), f"{y_val:.2f}", fill="black", font=font)
 
     # X ticks
     for epoch in range(1, n_epochs + 1):
         x = x_to_px(epoch)
         draw.line((x, height - bottom, x, height - bottom + 5), fill="black", width=1)
-        draw.text((x - 5, height - bottom + 10), str(epoch), fill="black", font=font)
 
-    train_points = [(x_to_px(i + 1), y_to_px(v)) for i, v in enumerate(train_loss)]
-    val_points = [(x_to_px(i + 1), y_to_px(v)) for i, v in enumerate(val_loss)]
+        # only label some ticks if there are many epochs
+        if n_epochs <= 20 or epoch == 1 or epoch == n_epochs or epoch % 5 == 0:
+            draw.text((x - 8, height - bottom + 10), str(epoch), fill="black", font=font)
 
-    # Colours
-    train_color = (40, 90, 200)
-    val_color = (220, 70, 60)
+    # Fixed colours for up to 4 lines
+    colours = [
+        (40, 90, 200),    # blue
+        (220, 70, 60),    # red
+        (50, 160, 80),    # green
+        (180, 120, 40),   # brown/orange
+    ]
 
     # Draw lines
-    draw.line(train_points, fill=train_color, width=3)
-    draw.line(val_points, fill=val_color, width=3)
+    for idx, (label, values) in enumerate(series):
+        colour = colours[idx % len(colours)]
+        points = [(x_to_px(i + 1), y_to_px(v)) for i, v in enumerate(values)]
+
+        if len(points) >= 2:
+            draw.line(points, fill=colour, width=3)
 
     # Legend
-    legend_x = width - 180
+    legend_x = width - 200
     legend_y = top + 10
-    draw.rectangle((legend_x, legend_y, legend_x + 140, legend_y + 50), outline="black", fill="white")
+    legend_height = 25 * len(series) + 15
+    draw.rectangle(
+        (legend_x, legend_y, legend_x + 180, legend_y + legend_height),
+        outline="black",
+        fill="white"
+    )
 
-    draw.line((legend_x + 10, legend_y + 15, legend_x + 35, legend_y + 15), fill=train_color, width=3)
-    draw.text((legend_x + 45, legend_y + 8), "Train loss", fill="black", font=font)
-
-    draw.line((legend_x + 10, legend_y + 35, legend_x + 35, legend_y + 35), fill=val_color, width=3)
-    draw.text((legend_x + 45, legend_y + 28), "Val loss", fill="black", font=font)
+    for idx, (label, _) in enumerate(series):
+        colour = colours[idx % len(colours)]
+        y = legend_y + 15 + idx * 25
+        draw.line((legend_x + 10, y, legend_x + 35, y), fill=colour, width=3)
+        draw.text((legend_x + 45, y - 7), label, fill="black", font=font)
 
     img.save(save_path)
     print(f"Saved plot to {save_path}")
@@ -171,6 +194,54 @@ def config_cuda() -> Tuple[torch.device, bool]:
 
     print(f"Using device: {device}")
     return device, use_cuda
+
+# ----------------------------- NETWORK -----------------------------
+
+class Net(nn.Module):
+    def __init__(self, drop_prob:float = 0.1, drop_block_size:int=3):
+        super().__init__()
+
+        # convolutional layers
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(32, 32, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(32)
+
+        self.conv3 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.conv4 = nn.Conv2d(64, 64, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(64)
+
+        self.conv5 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+
+        self.dropblock1 = DropBlock2d(p=drop_prob, block_size=drop_block_size) # dropblock
+        self.dropblock2 = DropBlock2d(p=drop_prob, block_size=drop_block_size)
+
+        self.pool = nn.MaxPool2d(2, 2) #using only maxpooling instead of say average pooling, as it is more common in image classification tasks
+        # seems like it would be better to pick up on sharp edges or other strong features
+
+        #output classifier
+        self.fc1 = nn.Linear(128 * 4 * 4, 256)
+        self.fc2 = nn.Linear(256, 100)
+
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.bn1(self.conv2(x)))
+        x = self.pool(x)
+
+        x = F.relu(self.conv3(x))
+        x = F.relu(self.bn2(self.conv4(x))) 
+        x = self.dropblock1(x)
+        x = self.pool(x)
+
+        x = F.relu(self.conv5(x))
+        x = self.dropblock2(x)
+        x = self.pool(x)
+
+        x = torch.flatten(x, 1)
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
+
+# ------------------------------ TRAIN ------------------------------
 
 def make_dataloaders(batch_size: int, use_cuda: bool) -> Tuple[DataLoader, DataLoader]:
     """
@@ -218,13 +289,14 @@ def train_epoch(net: Net,
             device (torch.device)
             use_cuda (bool)
 
-    outputs: train_loss_normal (float)
+    outputs: accuracy (float)
     """
     
-    # setup loss tracking, and iter count to normalise at the end
     net.train()
-    training_loss = 0.0
-    n_iter = 0
+
+    # setup up correct and total count to calculate accuracy
+    correct = 0
+    total = 0
     for data in train_loader: # train_loader is an iterable itself
         
         # get the inputs; data is a list of [inputs, labels]
@@ -236,20 +308,22 @@ def train_epoch(net: Net,
 
         # forward + backward + optimize
         outputs = net(inputs)
+        predictions = outputs.argmax(dim=1)
+
         # criterion itself performs label smoothing if provided as an argument to the instance
         loss = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
 
-        training_loss += loss.item()
-        n_iter += 1
+        correct += (predictions == labels).sum().item()
+        total += labels.size(0)
 
-    train_loss_normal = training_loss / n_iter
-    return train_loss_normal
+    accuracy = correct / total
+
+    return accuracy
         
 def validate_epoch(net: Net, 
                    val_loader: DataLoader, 
-                   criterion: torch.nn.CrossEntropyLoss, 
                    device: torch.device, 
                    use_cuda: bool) -> float:
     """
@@ -257,31 +331,33 @@ def validate_epoch(net: Net,
 
     inputs: net (Net)
             val_loader (DataLoader)
-            criterion (torch.nn.CrossEntropyLoss)
             device (torch.device)
             use_cuda (bool)
     
-    outputs: validation_loss_normal (float)
+    outputs: accuracy (float)
     """
     # Validation no training so we don't need to track gradients  
     # 
-    # setup loss tracking, and iter count to normalise at the end
     net.eval()
-    validation_loss = 0.0  
-    n_iter = 0
+
+    # setup up correct and total count to calculate accuracy
+    correct = 0
+    total = 0
     with torch.no_grad(): # disable gradient tracking for validation  
         for data in val_loader: # val_loader is also an iterable 
             inputs, labels = data
             inputs, labels = inputs.to(device, non_blocking=use_cuda), labels.to(device, non_blocking=use_cuda) # for GPU
 
             outputs = net(inputs)
-            loss = criterion(outputs, labels)
+            predictions = outputs.argmax(dim=1)
 
-            validation_loss += loss.item()
-            n_iter += 1
 
-    validation_loss_normal = validation_loss / n_iter
-    return validation_loss_normal
+            correct += (predictions == labels).sum().item()
+            total += labels.size(0)
+
+    accuracy = correct / total
+
+    return accuracy
 
 def train_model(epochs: int, 
                 patience: int, 
@@ -289,7 +365,8 @@ def train_model(epochs: int,
                 val_loader: DataLoader, 
                 net: Net, 
                 criterion: torch.nn.CrossEntropyLoss, 
-                optimizer: optim.SGD, 
+                optimizer: optim.Adam, 
+                regularise_flag: str,
                 device: torch.device, 
                 use_cuda: bool) -> Tuple[list, list]:
     """
@@ -311,29 +388,29 @@ def train_model(epochs: int,
              val_loss (list of float)
     """
     # setup early stopping tracking variables
-    best_val_loss = float('inf')
+    best_val_accuracy = float(0.0)
     epochs_no_improve = 0
     min_delta = 1e-4
 
     # setup lists to track training and validation loss over epochs for plotting later
-    train_loss = []
-    val_loss = []
+    train_accuracy = []
+    val_accuracy = []
     # train
     for epoch in range(epochs):  # loop over the dataset multiple times
         print(f"Epoch {epoch+1}/{epochs}")
 
-        training_loss = train_epoch(net, train_loader, criterion, optimizer, device, use_cuda)
-        train_loss.append(training_loss)
+        training_accuracy = train_epoch(net, train_loader, criterion, optimizer, device, use_cuda)
+        train_accuracy.append(training_accuracy)
 
-        validate_loss = validate_epoch(net, val_loader, criterion, device, use_cuda)
-        val_loss.append(validate_loss)
+        validate_accuracy = validate_epoch(net, val_loader, device, use_cuda)
+        val_accuracy.append(validate_accuracy)
 
-        print(f"Training Loss: {training_loss:.4f} | Validation Loss: {validate_loss:.4f}")
+        print(f"Training accuracy: {training_accuracy:.4f} | Validation accuracy: {validate_accuracy:.4f}")
 
-        if val_loss[-1] < best_val_loss - min_delta:
-            best_val_loss = val_loss[-1]
+        if val_accuracy[-1] > best_val_accuracy - min_delta:
+            best_val_accuracy = val_accuracy[-1]
             epochs_no_improve = 0
-            torch.save(net.state_dict(), "best_model_task2.pt")
+            torch.save(net.state_dict(), f"best_model_{regularise_flag}_task1.pt")
         else:
             epochs_no_improve += 1
 
@@ -341,7 +418,73 @@ def train_model(epochs: int,
             print(f"Early stopping at epoch {epoch+1}")
             break   
 
-    return train_loss, val_loss
+    return train_accuracy, val_accuracy
+
+def grid_search(
+    device: torch.device,
+    use_cuda: bool,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    learning_rate: float,
+    momentum: float,
+    epochs: int = 40,   # shorter for search
+    patience: int = 3 # shorter for search
+):
+    """
+    Performs a grid search over DropBlock and weight decay hyperparameters.
+
+    Returns:
+        best_config (dict)
+        all_results (list of dict)
+    """
+
+    drop_probs = [0.05, 0.1, 0.15]
+    block_sizes = [1, 3, 5]
+    weight_decays = [1e-4, 5e-4, 1e-3]
+
+    results = []
+    total_runs = len(drop_probs) * len(block_sizes) * len(weight_decays)
+    run_idx = 0
+
+    for drop_prob, block_size, w_decay in product(drop_probs, block_sizes, weight_decays):
+        run_idx += 1
+
+        print("\n" + "="*50)
+        print(f"Run {run_idx}/{total_runs}")
+        print(f"drop_prob={drop_prob}, block_size={block_size}, weight_decay={w_decay}")
+
+        # fresh model
+        net = Net(drop_prob=drop_prob, drop_block_size=block_size).to(device)
+
+        criterion = torch.nn.CrossEntropyLoss()
+
+        optimizer = optim.SGD(net.parameters(),lr=learning_rate,momentum=momentum, weight_decay=w_decay)
+
+        # train
+        train_accuracy, val_accuracy = train_model(epochs,patience,train_loader,val_loader,net,criterion,optimizer,"grid_search",device,use_cuda)
+
+        best_val = max(val_accuracy)
+        final_val = val_accuracy[-1]
+        gap = calculate_mean_gap(train_accuracy, val_accuracy)
+
+        result = {"drop_prob": drop_prob,"block_size": block_size,"weight_decay": w_decay,"best_val_accuracy": best_val,"final_val_accuracy": final_val,"mean_gap": gap}
+
+        results.append(result)
+
+        print(f"Best Val Loss: {best_val:.4f}")
+        print(f"Final Val Loss: {final_val:.4f}")
+        print(f"Mean Gap: {gap:.4f}")
+
+    # sort by best validation loss
+    results.sort(key=lambda x: x["best_val_accuracy"])
+
+    print("\n" + "="*50)
+    print("TOP 5 CONFIGS:")
+    for r in results[:5]:
+        print(r)
+
+    best_config = results[0]
+    return best_config, results
 
 if __name__ == '__main__':
     """
@@ -350,44 +493,71 @@ if __name__ == '__main__':
 
     batch_size = 128
     epochs = 100 
-    patience = 5 # for early stopping, if validation loss does not improve for this many epochs, stop training
+    patience = 3 # for early stopping, if validation loss does not improve for this many epochs, stop training
 
-    learning_rate = 0.005 # for SGD
+    learning_rate = 0.05 # for SGD
     momentum = 0.9 # for SGD
+
+    run_grid_search = False
 
     device, use_cuda = config_cuda()
     train_loader, val_loader, n_classes = make_dataloaders(batch_size, use_cuda)
     
-    net = Net().to(device)
+    if run_grid_search:
+        best_config, all_results = grid_search(device,use_cuda,train_loader,val_loader,learning_rate,momentum)
+        print("\nBest configuration found:")
+        print(best_config)
+        exit()
 
+    # ------- Train unregularised model -------
+    # hyperparams
+    regularise_flag = "no_regularisation"
+    print(f"Training {regularise_flag} model")
+
+    # init net with dropBlock
+    net = Net(drop_prob=0, drop_block_size=1).to(device)
 
     ## loss and optimiser
     criterion = torch.nn.CrossEntropyLoss()
-    optimizer = optim.SGD(net.parameters(), lr=learning_rate, momentum=momentum)    
+    optimizer = optim.SGD(net.parameters(),lr=learning_rate,momentum=momentum)
     
-    train_loss, val_loss = train_model(epochs, patience, train_loader, val_loader, net, criterion, optimizer, mixup, device, use_cuda)
+    train_accuracy_unreg, val_accuracy_unreg = train_model(epochs, patience, train_loader, val_loader, net, criterion, optimizer, regularise_flag, device, use_cuda)
 
     print('Training done.')
 
-    draw_loss_plot(train_loss, val_loss, save_path="loss_plot_no_MixUp.png", title="Training vs Validation Loss without MixUp or Label Smoothing")
-    mean_gap = calculate_mean_gap(train_loss, val_loss)
-    print(f"Mean gap between training and validation loss across epochs: {mean_gap:.4f}")
+    mean_gap = calculate_mean_gap(train_accuracy_unreg, val_accuracy_unreg)
+    print(f"Mean gap between training and validation accuracy across epochs for {regularise_flag}: {mean_gap:.4f}")
     # save trained model
-    print("Best model saved to best_model_task2.pt")
+    print(f"Best model saved to best_model_{regularise_flag}_task1.pt")
 
+
+    # ------- Train regularised model -------
+
+    # hyperparams
+    w_decay = 5e-4 # best params
+    drop_prob = 0.05 # best params
+    drop_block_size = 3 # best params
+    regularise_flag = "regularisation"
+
+    print(f"Training {regularise_flag} model")
+
+    net = Net(drop_prob=drop_prob, drop_block_size=drop_block_size).to(device)
+
+    ## loss and optimiser
+    criterion = torch.nn.CrossEntropyLoss()
+    optimizer = optim.SGD(net.parameters(),lr=learning_rate,momentum=momentum,weight_decay=w_decay)   
     
+    train_accuracy_reg, val_accuracy_reg = train_model(epochs, patience, train_loader, val_loader, net, criterion, optimizer, regularise_flag, device, use_cuda)
 
-    """
-    DO WEIGHT DECAY
-    ALSO ADD DROPOUT? (DropBlock?)
+    print('Training done.')
 
-    AND ALSO DO RANDOM SHIFT AUGMENTATION (translate the images around a little bit) (small dataset)
+    mean_gap = calculate_mean_gap(train_accuracy_reg, val_accuracy_reg)
+    print(f"Mean gap between training and validation accuracy across epochs for {regularise_flag}: {mean_gap:.4f}")
+    # save trained model
+    print(f"Best model saved to best_model_{regularise_flag}_task1.pt")
 
-    GEN AI STATEMENT, DISCUSS HOW IT INITALLY SUGGESTED A FAR TOO BIG NETWORK (many many layers, and final channel size of like 1024)
-    MASSIVELY OVERFITTING, AND EVALUATION SCORE STAYED REALLY LOW: ~15%
-    DUE TO THIS I MANUALLY EDITED THE SIZE A LOT AND PLAYED AROUND WITH OUTPUT SIZES AND LAYER NUMBERS AND ADDING MAXPOOL ETC...
-    THIS HAD A HUGE EFFECT; SO FUTURE IMPLEMENTATION COULD LACK AT IMPLEMENTING ARCHITECHURE SEARCH TO AUTOMATE THIS PROCESS, AS IT IS VERY TIME CONSUMING,
-    COULD PROBABLY BE DONE BETTER ALGORITHMICALLY (Genetic Algorithms optimisation over architecture hyperparameters) THIS SEEMED
-    TO HAVE THE LARGEST EFFECT ON PERFORMANCE, MORE SO THAN OPTIMISING OTHER HYPERPARAMETERS LIKE LEARNING RATE, BATCH SIZE, OR EPOCHS, OR OTHER REGULARISATION
-    , WHICH HAD MORE MARGINAL EFFECTS
-    """
+
+    lines = [("unregularised train accuracy", train_accuracy_unreg),("unregularised val accuracy", val_accuracy_unreg),("regularised train accuracy", train_accuracy_reg),("regularised val accuracy", val_accuracy_reg)]
+    
+    print(lines)
+    draw_accuracy_comparison_plot(lines, save_path="generalization_gap.png", title="Training vs Validation Accuracy Regularised vs Unregularised")
