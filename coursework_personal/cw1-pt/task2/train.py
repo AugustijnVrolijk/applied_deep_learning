@@ -351,13 +351,14 @@ class MixUp():
         # image information and prevent underfitting
         return max(lam, 1 - lam) 
 
-    def __call__(self, inputs: torch.Tensor, labels: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __call__(self, inputs: torch.Tensor, labels: torch.Tensor, *, lambda_param: float=None) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Apply MixUp augmentation to a batch of inputs and labels.
 
         inputs:
             inputs (torch.Tensor): A batch of input data, expected to be of shape (batch_size, channels, height, width)
             labels (torch.Tensor): A batch of labels, expected to be of shape (batch_size,)
+            lambda_param (float, optional): A mixing coefficient to use for this batch. If None, a random lambda will be sampled from the Beta distribution. (keyword only)
 
         outputs:
             inputs (torch.Tensor): A batch of mixed input data, expected to be of shape (batch_size, channels, height, width)
@@ -377,7 +378,9 @@ class MixUp():
             else:
                 raise ValueError("num_classes must be specified for MixUp when labels are not already one-hot encoded")
 
-        lambda_param = self.sample_beta() # sample a lambda for each example in the batch
+        if lambda_param is None:
+            lambda_param = self.sample_beta() # sample a lambda for each example in the batch
+
         permutation = torch.randperm(batch_size) # generate a random permutation of the batch indices to mix
 
 
@@ -465,7 +468,7 @@ def train_epoch(net: Net,
         
         # get the inputs; data is a list of [inputs, labels]
         inputs, labels = data
-        inputs, labels = mixup(inputs=inputs, labels=labels) # apply MixUp augmentation to the inputs and labels
+        #inputs, labels = mixup(inputs=inputs, labels=labels) # apply MixUp augmentation to the inputs and labels
 
         inputs, labels = inputs.to(device, non_blocking=use_cuda), labels.to(device, non_blocking=use_cuda) # for GPU
         # zero the parameter gradients
@@ -567,6 +570,8 @@ def train_model(epochs: int,
         validate_loss = validate_epoch(net, val_loader, criterion, device, use_cuda)
         val_loss.append(validate_loss)
 
+        print(f"Training Loss: {training_loss:.4f} | Validation Loss: {validate_loss:.4f}")
+
         if val_loss[-1] < best_val_loss - min_delta:
             best_val_loss = val_loss[-1]
             epochs_no_improve = 0
@@ -587,7 +592,7 @@ if __name__ == '__main__':
 
     batch_size = 128
     epochs = 100 
-    patience = 3 # for early stopping, if validation loss does not improve for this many epochs, stop training
+    patience = 5 # for early stopping, if validation loss does not improve for this many epochs, stop training
 
     learning_rate = 0.01 # for SGD
     momentum = 0.9 # for SGD
