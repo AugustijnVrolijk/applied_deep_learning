@@ -33,7 +33,7 @@ if __name__ == "__main__":
     """
     batch_size = 128
     noise_std = 0.05
-    unreg_model_path = "best_model_unregularisation_task1.pt"
+    unreg_model_path = "best_model_no_regularisation_task1.pt"
     reg_model_path = "best_model_regularisation_task1.pt"
     device, use_cuda = config_cuda()
 
