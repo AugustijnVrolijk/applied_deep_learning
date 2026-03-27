@@ -557,7 +557,6 @@ if __name__ == '__main__':
     print(f"Best model saved to best_model_{regularise_flag}_task1.pt")
 
 
-    lines = [("unregularised train accuracy", train_accuracy_unreg),("unregularised val accuracy", val_accuracy_unreg),("regularised train accuracy", train_accuracy_reg),("regularised val accuracy", val_accuracy_reg)]
-    
-    print(lines)
-    draw_accuracy_comparison_plot(lines, save_path="generalization_gap.png", title="Training vs Validation Accuracy Regularised vs Unregularised")
+    #lines = [("unregularised train accuracy", train_accuracy_unreg),("unregularised val accuracy", val_accuracy_unreg),("regularised train accuracy", train_accuracy_reg),("regularised val accuracy", val_accuracy_reg)]
+    #print(lines)
+    #draw_accuracy_comparison_plot(lines, save_path="generalization_gap.png", title="Training vs Validation Accuracy Regularised vs Unregularised")
