@@ -12,117 +12,121 @@
 # regarding implementing CUDA friendly code to speed up training on my machine, such as getting a device parameter
 # and smaller details like non_blocking transfers. 
 
-
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import torchvision
 import torchvision.transforms as transforms
 import torch.optim as optim
 
 from torch.utils.data import random_split, DataLoader
-from PIL import Image, ImageDraw, ImageFont
-
-from network import Net
 
 from typing import Tuple
+from PIL import Image, ImageDraw, ImageFont
 
 # sanity checks to make sure my GPU was being used
 #print(torch.cuda.is_available())
 #print(torch.cuda.device_count())
 #print(torch.cuda.current_device())
 #print(torch.cuda.device(0))
-#print(torch.cuda.get_device_name(0))
+#print(torch.cuda.get_device_name(0))  
 
-def draw_accuracy_plot(
-    train_acc: list[float],
-    val_acc: list[float],
-    save_path: str="accuracy_plot.png",
-    width: int=1000,
-    height: int=700,
-    title: str="Training and Validation Accuracy") -> None:
+
+
+# we can't have util files annoyingly, or I would try organise it a bit more...
+
+# ------------------------------ UTIL ------------------------------- 
+
+def calculate_mean_gap(train_loss: list[float], val_loss: list[float]) -> float:
     """
-    draw_accuracy_plot creates a line plot of training and validation accuracy over epochs and saves it as an image using Pillow
-    
-    This function was primarily created with AI assistance, and is not the main focus of the assignment
+    Calculate the mean gap between training and validation loss across epochs. Used for the writeup 
 
     inputs:
-        train_acc (list of float): list of training accuracies for each epoch
-        val_acc (list of float): list of validation accuracies for each epoch
-        save_path (str): path to save the generated plot image
-        width (int): width of the generated image in pixels
-        height (int): height of the generated image in pixels
-        title (str): title of the plot
-    
+        train_loss: list of training losses for each epoch
+        val_loss: list of validation losses for each epoch
     outputs:
-        None (saves the plot as an image to the specified path)
+        mean_gap: The average difference between training and validation loss across epochs
+    """
+    if len(train_loss) != len(val_loss):
+        raise ValueError("train_loss and val_loss must have the same length")
+
+    n_epochs = len(train_loss)
+    total_gap = sum(train - val for train, val in zip(train_loss, val_loss))
+    mean_gap = total_gap / n_epochs
+    return mean_gap
+
+def draw_loss_plot(train_loss: list[float],val_loss: list[float],save_path: str = "loss_plot.png",title: str = "Training vs Validation Loss") -> None:
+    """
+    Draw a simple line plot of training and validation loss over epochs using Pillow.
+    This function was generated using gen AI and is only used for visualisation support for the writeup
+
+    inputs:
+        train_loss: list of training losses for each epoch
+        val_loss: list of validation losses for each epoch
+        save_path: output image path
+        width: image width in pixels
+        title: plot title
+
+    outputs:
+        None (saves the image to save_path)
     """
 
-    if len(train_acc) != len(val_acc):
-        raise ValueError("train_acc and val_acc must have the same length")
+    width = 900
+    height = 600
 
-    if len(train_acc) < 2:
+    if len(train_loss) != len(val_loss):
+        raise ValueError("train_loss and val_loss must have the same length")
+
+    if len(train_loss) < 2:
         raise ValueError("Need at least 2 epochs to draw a line plot")
 
-    # Create blank canvas
     img = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(img)
-
-    # Try default font
     font = ImageFont.load_default()
 
     # Margins
-    left = 100
-    right = 50
-    top = 70
-    bottom = 100
-
+    left = 80
+    right = 40
+    top = 50
+    bottom = 70
     plot_width = width - left - right
     plot_height = height - top - bottom
 
-    # Data range
-    n_epochs = len(train_acc)
-    x_min, x_max = 1, n_epochs
+    n_epochs = len(train_loss)
 
-    # Accuracy usually in [0,1], but adapt to data with a bit of padding
-    all_vals = train_acc + val_acc
-    y_min_data = min(all_vals)
-    y_max_data = max(all_vals)
+    all_vals = train_loss + val_loss
+    y_min = min(all_vals)
+    y_max = max(all_vals)
 
-    # Nice fixed range if values are probabilities
-    y_min = min(0.0, y_min_data - 0.02)
-    y_max = max(1.0, y_max_data + 0.02)
+    # add small padding so lines do not touch borders
+    pad = 0.05 * (y_max - y_min) if y_max > y_min else 0.1
+    y_min -= pad
+    y_max += pad
 
-    if y_max == y_min:
-        y_max = y_min + 1e-6
+    def x_to_px(epoch: int) -> float:
+        return left + (epoch - 1) / (n_epochs - 1) * plot_width
 
-    def x_to_px(epoch):
-        # epoch is 1-indexed
-        return left + (epoch - x_min) / (x_max - x_min) * plot_width
+    def y_to_px(value: float) -> float:
+        return top + (y_max - value) / (y_max - y_min) * plot_height
 
-    def y_to_px(acc):
-        # invert y because image coordinates grow downward
-        return top + (y_max - acc) / (y_max - y_min) * plot_height
+    # Axes
+    draw.line((left, top, left, height - bottom), fill="black", width=2)
+    draw.line((left, height - bottom, width - right, height - bottom), fill="black", width=2)
 
-    # Draw axes
-    axis_color = "black"
-    draw.line((left, top, left, height - bottom), fill=axis_color, width=2)                # y-axis
-    draw.line((left, height - bottom, width - right, height - bottom), fill=axis_color, width=2)  # x-axis
+    # Title and labels
+    draw.text((width // 2 - 80, 15), title, fill="black", font=font)
+    draw.text((width // 2 - 20, height - 30), "Epoch", fill="black", font=font)
+    draw.text((15, (height/2)), "Loss", fill="black", font=font)
 
-    # Title
-    draw.text((width // 2 - 120, 20), title, fill="black", font=font)
+    # Y ticks
+    n_y_ticks = 5
+    for i in range(n_y_ticks + 1):
+        frac = i / n_y_ticks
+        y_val = y_min + frac * (y_max - y_min)
+        y = y_to_px(y_val)
 
-    # Axis labels
-    draw.text((width // 2 - 20, height - 40), "Epoch", fill="black", font=font)
-    draw.text((20, top - 20), "Accuracy", fill="black", font=font)
-
-    # Grid + y ticks
-    y_ticks = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
-    grid_color = (220, 220, 220)
-
-    for yv in y_ticks:
-        if y_min <= yv <= y_max:
-            y = y_to_px(yv)
-            draw.line((left, y, width - right, y), fill=grid_color, width=1)
-            draw.text((50, y - 7), f"{yv:.1f}", fill="black", font=font)
+        draw.line((left, y, width - right, y), fill=(220, 220, 220), width=1)
+        draw.text((45, y - 7), f"{y_val:.2f}", fill="black", font=font)
 
     # X ticks
     for epoch in range(1, n_epochs + 1):
@@ -130,40 +134,103 @@ def draw_accuracy_plot(
         draw.line((x, height - bottom, x, height - bottom + 5), fill="black", width=1)
         draw.text((x - 5, height - bottom + 10), str(epoch), fill="black", font=font)
 
-    # Convert series to points
-    train_points = [(x_to_px(i + 1), y_to_px(v)) for i, v in enumerate(train_acc)]
-    val_points = [(x_to_px(i + 1), y_to_px(v)) for i, v in enumerate(val_acc)]
+    train_points = [(x_to_px(i + 1), y_to_px(v)) for i, v in enumerate(train_loss)]
+    val_points = [(x_to_px(i + 1), y_to_px(v)) for i, v in enumerate(val_loss)]
+
+    # Colours
+    train_color = (40, 90, 200)
+    val_color = (220, 70, 60)
 
     # Draw lines
-    train_color = (40, 90, 200)   # blue-ish
-    val_color = (220, 70, 60)     # red-ish
-
     draw.line(train_points, fill=train_color, width=3)
     draw.line(val_points, fill=val_color, width=3)
 
-    # Draw markers
-    r = 4
-    for x, y in train_points:
-        draw.ellipse((x - r, y - r, x + r, y + r), fill=train_color)
-
-    for x, y in val_points:
-        draw.ellipse((x - r, y - r, x + r, y + r), fill=val_color)
-
     # Legend
-    legend_x = width - 220
+    legend_x = width - 180
     legend_y = top + 10
+    draw.rectangle((legend_x, legend_y, legend_x + 140, legend_y + 50), outline="black", fill="white")
 
-    draw.rectangle((legend_x, legend_y, legend_x + 160, legend_y + 60), outline="black", fill="white")
-    draw.line((legend_x + 10, legend_y + 18, legend_x + 40, legend_y + 18), fill=train_color, width=3)
-    draw.text((legend_x + 50, legend_y + 10), "Train accuracy", fill="black", font=font)
+    draw.line((legend_x + 10, legend_y + 15, legend_x + 35, legend_y + 15), fill=train_color, width=3)
+    draw.text((legend_x + 45, legend_y + 8), "Train loss", fill="black", font=font)
 
-    draw.line((legend_x + 10, legend_y + 43, legend_x + 40, legend_y + 43), fill=val_color, width=3)
-    draw.text((legend_x + 50, legend_y + 35), "Val accuracy", fill="black", font=font)
+    draw.line((legend_x + 10, legend_y + 35, legend_x + 35, legend_y + 35), fill=val_color, width=3)
+    draw.text((legend_x + 45, legend_y + 28), "Val loss", fill="black", font=font)
 
     img.save(save_path)
-    print(f"Saved plot to {save_path}")  
+    print(f"Saved plot to {save_path}")
+
+def config_cuda() -> Tuple[torch.device, bool]:
+    """
+    Helper function which checks if CUDA is available and returns the appropriate device and a boolean flag for use_cuda,
+    which can be used for pin_memory in dataloaders and non_blocking transfers to GPU
+    
+    inputs: None
+
+    outputs: device (torch.device),
+             use_cuda (bool)
+    """
+    use_cuda = torch.cuda.is_available()
+    if use_cuda:
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
+
+    print(f"Using device: {device}")
+    return device, use_cuda
+
+# ----------------------------- NETWORK -----------------------------
+
+class Net(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        # convolutional layers
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(32, 32, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(32)
+
+        self.conv3 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.conv4 = nn.Conv2d(64, 64, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(64)
+
+        self.conv5 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+
+        self.pool = nn.MaxPool2d(2, 2) #using only maxpooling instead of say average pooling, as it is more common in image classification tasks
+        # seems like it would be better to pick up on sharp edges or other strong features
+
+        #output classifier
+        self.fc1 = nn.Linear(128 * 4 * 4, 256)
+        self.fc2 = nn.Linear(256, 100)
+
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.bn1(self.conv2(x)))
+        x = self.pool(x)
+
+        x = F.relu(self.conv3(x))
+        x = F.relu(self.bn2(self.conv4(x))) 
+        x = self.pool(x)
+
+        x = F.relu(self.conv5(x))
+        x = self.pool(x)
+
+        x = torch.flatten(x, 1)
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
+
+# ------------------------------ TRAIN ------------------------------
 
 def to_one_hot(labels: torch.Tensor, num_classes: int) -> torch.Tensor:
+    """
+    Convert labels to one-hot encoded tensors
+    inputs:
+        labels (torch.Tensor): A tensor of shape (batch_size,) containing class indices
+        num_classes (int): The total number of classes for one-hot encoding 
+
+    outputs:
+        one_hot_labels (torch.Tensor): A tensor of shape (batch_size, num_classes) containing one-hot encoded labels
+    """
 
     if len(labels.shape) != 1:
         raise ValueError("labels must be a 1D tensor of shape (batch_size,)")
@@ -310,14 +377,15 @@ class MixUp():
     MixUp creates new training samples by taking convex combinations of pairs of examples and their labels.
     
     """
-    def __init__(self, alpha: float = 1.0, num_classes: int = None):
+    def __init__(self, alpha: float = 1.0, num_classes: int = None, active: bool = True):
         """
         Initialize the MixUp data augmentation technique.
 
         inputs:
             alpha (float): The alpha parameter for the Beta distribution used to sample the mixing coefficient.
             num_classes (int): The number of classes in the classification task, needed for one-hot encoding of labels when applying MixUp to labels.
-        
+            active (bool): Whether to apply MixUp augmentation when the instance is called. If False, the instance will return the original inputs and labels without mixing.
+            
         outputs:
             Mixup object that can be called to apply MixUp augmentation to a batch of inputs and labels
         """
@@ -325,6 +393,7 @@ class MixUp():
         if alpha <= 0:
             raise ValueError("alpha must be greater than 0 for MixUp")
         
+        self.active = active
         self.alpha = alpha
         self.num_classes = num_classes
 
@@ -364,6 +433,9 @@ class MixUp():
             inputs (torch.Tensor): A batch of mixed input data, expected to be of shape (batch_size, channels, height, width)
             labels (torch.Tensor): A batch of mixed labels, expected to be of shape (batch_size, num_classes)
         """
+        if not self.active:
+            return inputs, labels
+
         batch_size = inputs.size(0)
 
         if batch_size < 2:
@@ -388,26 +460,6 @@ class MixUp():
         mixed_labels = lambda_param * labels + (1 - lambda_param) * labels[permutation] # mix the labels according to the same permutation and lambda
 
         return mixed_inputs, mixed_labels
-
-
-def config_cuda() -> Tuple[torch.device, bool]:
-    """
-    Helper function which checks if CUDA is available and returns the appropriate device and a boolean flag for use_cuda,
-    which can be used for pin_memory in dataloaders and non_blocking transfers to GPU
-    
-    inputs: None
-
-    outputs: device (torch.device),
-             use_cuda (bool)
-    """
-    use_cuda = torch.cuda.is_available()
-    if use_cuda:
-        device = torch.device("cuda")
-    else:
-        device = torch.device("cpu")
-
-    print(f"Using device: {device}")
-    return device, use_cuda
 
 def make_dataloaders(batch_size: int, use_cuda: bool) -> Tuple[DataLoader, DataLoader]:
     """
@@ -441,7 +493,7 @@ def make_dataloaders(batch_size: int, use_cuda: bool) -> Tuple[DataLoader, DataL
 
 def train_epoch(net: Net, 
                 train_loader: DataLoader, 
-                criterion: torch.nn.CrossEntropyLoss, 
+                criterion: soft_cross_entropy_loss, 
                 optimizer: optim.SGD, 
                 mixup: MixUp,
                 device: torch.device, 
@@ -469,7 +521,7 @@ def train_epoch(net: Net,
         # get the inputs; data is a list of [inputs, labels]
         inputs, labels = data
         inputs, labels = mixup(inputs=inputs, labels=labels) # apply MixUp augmentation to the inputs and labels
-
+        
         inputs, labels = inputs.to(device, non_blocking=use_cuda), labels.to(device, non_blocking=use_cuda) # for GPU
         # zero the parameter gradients
         optimizer.zero_grad(set_to_none=True) 
@@ -489,7 +541,7 @@ def train_epoch(net: Net,
         
 def validate_epoch(net: Net, 
                    val_loader: DataLoader, 
-                   criterion: torch.nn.CrossEntropyLoss, 
+                   criterion: soft_cross_entropy_loss, 
                    device: torch.device, 
                    use_cuda: bool) -> float:
     """
@@ -528,7 +580,7 @@ def train_model(epochs: int,
                 train_loader: DataLoader, 
                 val_loader: DataLoader, 
                 net: Net, 
-                criterion: torch.nn.CrossEntropyLoss, 
+                criterion: soft_cross_entropy_loss, 
                 optimizer: optim.SGD, 
                 mixup: MixUp,
                 device: torch.device, 
@@ -575,7 +627,7 @@ def train_model(epochs: int,
         if val_loss[-1] < best_val_loss - min_delta:
             best_val_loss = val_loss[-1]
             epochs_no_improve = 0
-            torch.save(net.state_dict(), "best_model.pt")
+            torch.save(net.state_dict(), "best_model_task2.pt")
         else:
             epochs_no_improve += 1
 
@@ -605,9 +657,9 @@ if __name__ == '__main__':
     
     net = Net().to(device)
 
-    
+    active = True
     # custom mixup implementation, with specified alpha and number of classes for one-hot encoding
-    mixup = MixUp(alpha=alpha, num_classes=n_classes) # example of how to initialize MixUp, not currently used in training loop but can be easily integrated by applying it to the inputs and labels in the train_epoch function before the forward pass
+    mixup = MixUp(alpha=alpha, num_classes=n_classes, active=active) # example of how to initialize MixUp, not currently used in training loop but can be easily integrated by applying it to the inputs and labels in the train_epoch function before the forward pass
     ## loss and optimiser
     # Custom soft_cross_entropy_loss function, also implements label smoothing with given smoothing factor
     criterion = soft_cross_entropy_loss(n_classes, smoothing_factor)
@@ -617,12 +669,18 @@ if __name__ == '__main__':
 
     print('Training done.')
 
-    draw_accuracy_plot(train_loss, val_loss, save_path="accuracy_plot.png")
-    # save trained model
-    print("Best model saved to best_model.pt")
+    mixup_str = f"MixUp_{alpha}" if active else "NoMixUp"
+    smoothing_str = f"Smoothing_{smoothing_factor}" if smoothing_factor > 0 else "NoSmoothing"
+    filename = f"loss_plot_{mixup_str}_{smoothing_str}.png"
+    
+    mixup_str = f"MixUp (alpha={str(alpha).replace(".", "_")})" if active else "No MixUp"
+    smoothing_str = f"Label Smoothing (factor={str(smoothing_factor).replace(".", "_")})" if smoothing_factor > 0 else "No Smoothing"
+    title = f"Training vs Validation Loss ({mixup_str}, {smoothing_str})"
 
-    DISCUSS 3 THINGS; Memorization stopped with MixUp
-    DEFEND MY LABEL SMOOTHING; for my version its mathematically identical to do before or after MixUp
-    then look at whether it even helped or not, turn label smoothing off and see if it makes a difference,
-    IF NOT THEN MENTION THAT MAYBE MIXUP WAS ALREADY DOING A SIMILAR JOB IN REGULARIZATION, TURNING THE OUTPUT LABELS
-    ALREADY INTO SOFT TARGETS; SO THE LABEL SMOOTHING WASN'T SO USEFUL
+    draw_loss_plot(train_loss, val_loss, save_path=filename, title=title)
+    mean_gap = calculate_mean_gap(train_loss, val_loss)
+    print(f"Mean gap between training and validation loss across epochs: {mean_gap:.4f}")
+    # save trained model
+    print("Best model saved to best_model_task2.pt")
+
+    

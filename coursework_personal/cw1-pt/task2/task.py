@@ -11,10 +11,19 @@ import torchvision.transforms as transforms
 
 from torch.utils.data import DataLoader
 
-from network import Net
-from train import MixUp, config_cuda
+from train import Net, MixUp, config_cuda
 
 def add_gaussian_noise(inputs, std=0.15):
+    """
+    Adds Gaussian noise to the input tensor.
+
+    inputs:
+        inputs (torch.Tensor): The input tensor to add noise to
+        std (float): The standard deviation of the Gaussian noise
+
+    outputs:
+        noisy (torch.Tensor): The noisy input tensor
+    """
     noisy = inputs + std * torch.randn_like(inputs)
     return torch.clamp(noisy, -1.0, 1.0)
 
@@ -22,6 +31,12 @@ def make_testloader(batch_size: int, use_cuda: bool) -> DataLoader:
     """
     Creates the CIFAR-100 test dataloader with the same normalisation
     used during training.
+    inputs:
+        batch_size (int): The batch size to use for the dataloader
+        use_cuda (bool): Whether to use CUDA for data loading
+    
+    outputs:
+        testloader (DataLoader): A DataLoader for the CIFAR-100 test set
     """
     transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),])
     testset = torchvision.datasets.CIFAR100(root="./data",train=False,download=True,transform=transform,)
@@ -92,20 +107,20 @@ def save_mixup_demo(lambda_param: float = 0.4) -> None:
     mixed_inputs = mixed_inputs * 0.5 + 0.5
     mixed_inputs = torch.clamp(mixed_inputs, 0.0, 1.0)
 
-    grid = make_grid(
-        mixed_inputs,
-        nrow=4,
-        padding=2,
-    )
+    grid = make_grid(mixed_inputs,nrow=4,padding=2,)
 
     save_image(grid, save_path)
     print(f"Saved MixUp montage to {save_path}")
 
 
 if __name__ == "__main__":
+    """
+    main function to evaluate the trained model on a noisy test set and save a MixUp demo image.
+      Also includes discussion points on the effects of MixUp and label smoothing on memorization and regularization.
+    """
     batch_size = 128
     noise_std = 0.05
-    model_path = "best_model.pt"
+    model_path = "best_model_task2.pt"
 
     device, use_cuda = config_cuda()
 
@@ -119,3 +134,17 @@ if __name__ == "__main__":
     print(f"Noisy test accuracy (std={noise_std:.2f}): {noisy_accuracy * 100:.2f}%")
 
     save_mixup_demo(lambda_param=0.4)
+
+    """
+    DISCUSS 3 THINGS; Memorization was massively protected with MixUp
+    DEFEND MY LABEL SMOOTHING; for my version its mathematically identical to do before or after MixUp
+    then look at whether it even helped or not, turn label smoothing off and see if it makes a difference,
+    IF NOT THEN MENTION THAT MAYBE MIXUP WAS ALREADY DOING A SIMILAR JOB IN REGULARIZATION, TURNING THE OUTPUT LABELS
+    ALREADY INTO SOFT TARGETS; SO THE LABEL SMOOTHING WASN'T SO USEFUL
+    """
+
+
+    """with mixup and label smoothing, got a test accuracy of 51.58%, final loss was 2.43; mean gap was 0.13"""
+    """with mixup and no label smoothing, got a test accuracy of 51.04%, final loss was 1.89"""
+    """with no mixup and label smoothing, got a test accuracy of 49.40%, final loss was 2.51"""
+    """with no mixup and no label smoothing, got a test accuracy of 45.20%, final loss was 2.22; mean gap was 0.52"""
