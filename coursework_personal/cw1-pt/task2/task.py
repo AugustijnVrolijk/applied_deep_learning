@@ -112,11 +112,47 @@ def save_mixup_demo(lambda_param: float = 0.4) -> None:
     save_image(grid, save_path)
     print(f"Saved MixUp montage to {save_path}")
 
+def print_technical_justification():
+    """
+    print technical justification for task 2
+
+    DISCUSS 3 THINGS; Memorization was massively protected with MixUp
+    DEFEND MY LABEL SMOOTHING; for my version its mathematically identical to do before or after MixUp
+    then look at whether it even helped or not, turn label smoothing off and see if it makes a difference,
+    IF NOT THEN MENTION THAT MAYBE MIXUP WAS ALREADY DOING A SIMILAR JOB IN REGULARIZATION, TURNING THE OUTPUT LABELS
+    ALREADY INTO SOFT TARGETS; SO THE LABEL SMOOTHING WASN'T SO USEFUL
+    
+    with mixup and label smoothing, got a test accuracy of 51.58%, final loss was 2.43; mean gap was 0.13
+    with mixup and no label smoothing, got a test accuracy of 51.04%, final loss was 1.89
+    with no mixup and label smoothing, got a test accuracy of 49.40%, final loss was 2.51
+    with no mixup and no label smoothing, got a test accuracy of 45.20%, final loss was 2.22; mean gap was 0.52
+    """
+
+    title_1 = "Reduced Memorisation Mixup\n"
+    para_1 = "MixUp reduces memorisation by altering the effective training distribution. Instead of training on discrete samples (x_i, y_i), the model is trained on convex combinations:\n"
+    eq_1 = "x_tilde = lambda * x_i + (1 - lambda) * x_j\n"
+    eq_2 = "y_tilde = lambda * y_i + (1 - lambda) * y_j, lambda ~ Beta(alpha, alpha)\n"
+    para_2 = "This enforces approximate linear behaviour between samples. In standard training, high-capacity networks can memorise by fitting highly non-linear decision boundaries that pass exactly through training points (textbook overfitting). MixUp prevents this by requiring correct predictions on interpolated inputs between samples. Consequently, the model is biased towards smoother functions with lower curvature, reducing its ability to overfit.\n"
+    para_3 = "Empirically, this is visible in the training–validation gap. Without MixUp and without label smoothing, the mean gap is 0.52, indicating strong overfitting. With MixUp (and smoothing), the gap drops to 0.13 (~75% reduction). This is consistent with reduced memorisation: the model cannot assign arbitrarily confident predictions to isolated points because it must remain consistent across interpolations. The loss plots (“loss_plot_MixUp_0_4_Smoothing_0_1.png” and “loss_plot_NoMixUp_NoSmoothing.png” reinforce this: the no-MixUp setup shows diverging training and validation loss (classic memorisation), whereas MixUp keeps them closely aligned throughout training (apart from slight divergence towards the end when validation accuracy plateau’s). Interestingly we also notice that throughout most the training, the validation loss is lower than the training loss. This is most likely because the validation loop doesn’t mixup the dataset, as such they are “easier” to classify and get a lower loss.  (With the same logic we see that when training with no mixup we observe much lower initial loss, however the accuracy remains lower despite a lower loss)\n"
+    title_2 = "Label smoothing implementation\n"
+    eq_3 =  "y_smooth = (1 - epsilon) * y + epsilon / K\n"
+    para_4 = "This reduces target “hardness” by preventing probabilities of exactly 0 or 1. Since both MixUp and smoothing are linear operations, applying smoothing before or after MixUp is mathematically equivalent.\n"
+    para_5 = "The key effect is on gradient magnitude. For cross-entropy:\n"
+    eq_4 = "dL/dz_k = p_k - y_k\n"
+    para_6 = "With hard labels (y_k in {0,1}), gradients can be large, especially when predictions are incorrect (e.g. p_k - 1), leading to aggressive updates and potential overshooting. With smoothing, y_k is bounded away from 0 and 1, reducing gradient extremes. This stabilises optimisation and discourages overconfident predictions, improving calibration. This was shown by a 4.2% increase in test accuracy when using smoothing compared to no smoothing (in both when no MixUp was used)\n"
+    title_3 = "Interaction Between MixUp and Label Smoothing\n"
+    para_7 = "Results indicate that MixUp provides the dominant regularisation:\n"
+    table_1 = "   - MixUp + smoothing: 51.58%\n    - MixUp only: 51.04% (difference of +0.54%)\n    - No MixUp + smoothing: 49.40%\n    - No MixUp: 45.20%\n"
+    para_8 = "The dominant gain (~6.4%) comes from MixUp, while smoothing contributes marginally (~0.5%). This is expected: MixUp already produces soft targets via (y_tilde), effectively acting as a data-dependent form of label smoothing. Therefore, adding explicit smoothing somewhat redundant.\n"
+    conclusion = "To conclude MixUp prevents memorisation by enforcing linear behaviour between samples and reducing effective model capacity to overfit. Label smoothing stabilises optimisation by reducing gradient extremes and preventing overconfidence. In this setting, MixUp provides the primary regularisation effect, while label smoothing offers only marginal additional benefit due to overlapping mechanisms.\n"
+    output_string = f"\n{title_1}\n{para_1}\n{eq_1}{eq_2}\n{para_2}{para_3}\n{title_2}\n{eq_3}\n{para_4}\n{para_5}\n{eq_4}\n{para_6}\n{title_3}\n{para_7}{table_1}\n{para_8}\n{conclusion}"
+    print("TECHNICAL JUSTIFICATION: \n\n")
+    print(output_string)
 
 if __name__ == "__main__":
     """
     main function to evaluate the trained model on a noisy test set and save a MixUp demo image.
-      Also includes discussion points on the effects of MixUp and label smoothing on memorization and regularization.
+    Also includes discussion points on the effects of MixUp and label smoothing on memorization and regularization.
     """
     batch_size = 128
     noise_std = 0.05
@@ -134,17 +170,4 @@ if __name__ == "__main__":
     print(f"Noisy test accuracy (std={noise_std:.2f}): {noisy_accuracy * 100:.2f}%")
 
     save_mixup_demo(lambda_param=0.4)
-
-    """
-    DISCUSS 3 THINGS; Memorization was massively protected with MixUp
-    DEFEND MY LABEL SMOOTHING; for my version its mathematically identical to do before or after MixUp
-    then look at whether it even helped or not, turn label smoothing off and see if it makes a difference,
-    IF NOT THEN MENTION THAT MAYBE MIXUP WAS ALREADY DOING A SIMILAR JOB IN REGULARIZATION, TURNING THE OUTPUT LABELS
-    ALREADY INTO SOFT TARGETS; SO THE LABEL SMOOTHING WASN'T SO USEFUL
-    """
-
-
-    """with mixup and label smoothing, got a test accuracy of 51.58%, final loss was 2.43; mean gap was 0.13"""
-    """with mixup and no label smoothing, got a test accuracy of 51.04%, final loss was 1.89"""
-    """with no mixup and label smoothing, got a test accuracy of 49.40%, final loss was 2.51"""
-    """with no mixup and no label smoothing, got a test accuracy of 45.20%, final loss was 2.22; mean gap was 0.52"""
+    print_technical_justification()

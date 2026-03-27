@@ -669,12 +669,12 @@ if __name__ == '__main__':
 
     print('Training done.')
 
-    mixup_str = f"MixUp_{alpha}" if active else "NoMixUp"
-    smoothing_str = f"Smoothing_{smoothing_factor}" if smoothing_factor > 0 else "NoSmoothing"
+    mixup_str = f"MixUp_{str(alpha).replace(".", "_")}" if active else "NoMixUp"
+    smoothing_str = f"Smoothing_{str(smoothing_factor).replace(".", "_")}" if smoothing_factor > 0 else "NoSmoothing"
     filename = f"loss_plot_{mixup_str}_{smoothing_str}.png"
     
-    mixup_str = f"MixUp (alpha={str(alpha).replace(".", "_")})" if active else "No MixUp"
-    smoothing_str = f"Label Smoothing (factor={str(smoothing_factor).replace(".", "_")})" if smoothing_factor > 0 else "No Smoothing"
+    mixup_str = f"MixUp (alpha={alpha})" if active else "No MixUp"
+    smoothing_str = f"Label Smoothing (factor={smoothing_factor})" if smoothing_factor > 0 else "No Smoothing"
     title = f"Training vs Validation Loss ({mixup_str}, {smoothing_str})"
 
     draw_loss_plot(train_loss, val_loss, save_path=filename, title=title)
