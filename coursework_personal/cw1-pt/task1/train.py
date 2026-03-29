@@ -4,14 +4,13 @@
 #
 # Gen AI usage statement:
 #
-# Gen AI was used to create the draw_accuracy_plot function, which is not the main focus of the assignment
+# Gen AI was used to create the draw_accuracy_comparisonplot function, which is not the main focus of the assignment
 # It was also used to help generate typehints and docstrings for functions, which were after validated by me
 # The main training loop, logic and functions were written by me, however Gen AI was used to help understand
-# the structure of Pytorch, i.e. understanding loss.backward(), requires the criterion function to return
-# a tensor object, rather than just performing the math and returning a scalar. It also helped with guidance
-# regarding implementing CUDA friendly code to speed up training on my machine, such as getting a device parameter
-# and smaller details like non_blocking transfers. 
-
+# the structure of Pytorch. It also helped with guidance regarding implementing CUDA friendly code to speed up 
+# training on my machine, such as getting a device parameter and smaller details like non_blocking transfers. 
+# Finally gen AI was also initially used to brainstorm a what network architecture to use, However it was very
+# ineffective for this (see technical justification where this is discussed in more detail)
 
 import torch
 import torch.nn as nn

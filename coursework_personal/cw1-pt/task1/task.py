@@ -1,4 +1,9 @@
 # task.py
+# Gen AI usage statement:
+#
+# Gen AI was not used at all for this script
+
+
 import torch
 
 from train import Net, config_cuda, draw_accuracy_comparison_plot

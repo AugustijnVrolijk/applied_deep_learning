@@ -1,6 +1,11 @@
 # task.py
 # Evaluates a trained CIFAR-100 model on a noisy test set
 # and saves a montage of 16 MixUp-processed images.
+#
+#
+# Gen AI usage statement:
+#
+# Gen AI was not used in this script at all
 
 from torch.utils.data import DataLoader
 from torchvision.utils import make_grid, save_image
