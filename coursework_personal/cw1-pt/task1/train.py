@@ -483,7 +483,7 @@ def grid_search(
     for r in results[:5]:
         print(r)
 
-    with open("results.txt", "w") as f:
+    with open("grid_search_results.txt", "w") as f:
 
         f.write("\nTOP 5 CONFIGS (sorted by best_val_accuracy):\n")
         f.write("="*50 + "\n")
@@ -545,7 +545,6 @@ if __name__ == '__main__':
     # save trained model
     print(f"Best model saved to best_model_{regularise_flag}_task1.pt")
 
-
     # ------- Train regularised model -------
 
     # hyperparams
@@ -571,7 +570,7 @@ if __name__ == '__main__':
     # save trained model
     print(f"Best model saved to best_model_{regularise_flag}_task1.pt")
 
-
-    lines = [("unregularised train accuracy", train_accuracy_unreg),("unregularised val accuracy", val_accuracy_unreg),("regularised train accuracy", train_accuracy_reg),("regularised val accuracy", val_accuracy_reg)]
-    print(lines)
-    draw_accuracy_comparison_plot(lines, save_path="generalization_gap.png", title="Training vs Validation Accuracy Regularised vs Unregularised")
+    """ summary statistics and plot accuracy curves for regularised vs unregularised models """
+    lines = [("regularised train accuracy", train_accuracy_reg),("regularised val accuracy", val_accuracy_reg)]
+    #print(lines)
+    #draw_accuracy_comparison_plot(lines, save_path="generalization_gap.png", title="Training vs Validation Accuracy Regularised vs Unregularised")
