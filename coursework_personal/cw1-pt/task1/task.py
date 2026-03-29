@@ -47,10 +47,17 @@ if __name__ == "__main__":
     state_dict2 = torch.load(unreg_model_path, map_location=device)
     unreg_net.load_state_dict(state_dict2)
 
-    series = [('unregularised train accuracy', [0.1174, 0.252025, 0.352625, 0.436025, 0.50275, 0.556725, 0.621575, 0.678175, 0.725425, 0.76885]), 
-     ('unregularised val accuracy', [0.1896, 0.2554, 0.3326, 0.3689, 0.3936, 0.3995, 0.4148, 0.4078, 0.4063, 0.3968]), 
-     ('regularised train accuracy', [0.127575, 0.2604, 0.3482, 0.4138, 0.46455, 0.5072, 0.54505, 0.583425, 0.6083, 0.630375, 0.655025, 0.6831]), 
-     ('regularised val accuracy', [0.1988, 0.2606, 0.3464, 0.3776, 0.4069, 0.4213, 0.4257, 0.4191, 0.4466, 0.4292, 0.4345, 0.413])]
+    """
+    the following were the results I got from training the regularised and unregularised models,
+    In order to not need to re-run train.py to plot the results, I have hardcoded the training and validation accuracies for both models here
+    There was an option to save these accuracies during training, i.e. to a .csv or .txt but we were explicitly told not to rely on any external files
+    other than train and task.py, hence the hardcoding...
+    """
+    series = [('unregularised train accuracy', [0.0958, 0.235775, 0.3259, 0.39305, 0.4479, 0.495075, 0.535725, 0.5767, 0.6168, 0.656725, 0.698325, 0.7321, 0.775625, 0.817575, 0.854675]), 
+              ('unregularised val accuracy', [0.1535, 0.27, 0.3156, 0.338, 0.3574, 0.4274, 0.4374, 0.4428, 0.4712, 0.469, 0.4759, 0.487, 0.4782, 0.4763, 0.4818]), 
+              ('regularised train accuracy', [0.092325, 0.223025, 0.310725, 0.376975, 0.43, 0.472, 0.50615, 0.539725, 0.573875, 0.60415, 0.63535, 0.66535, 0.692925, 0.72095, 0.75315, 0.77945, 0.804575, 0.828775, 0.8465, 0.870025, 0.88335]), 
+              ('regularised val accuracy', [0.1365, 0.2503, 0.3279, 0.364, 0.3951, 0.4204, 0.4296, 0.4488, 0.4755, 0.4684, 0.4736, 0.482, 0.4634, 0.4871, 0.4983, 0.4908, 0.4943, 0.5045, 0.5027, 0.5019, 0.4993])]
     draw_accuracy_comparison_plot(series, "generalization_gap.png",title="Training vs Validation Accuracy Regularised vs Unregularised")
+
 
     print_technical_justification()

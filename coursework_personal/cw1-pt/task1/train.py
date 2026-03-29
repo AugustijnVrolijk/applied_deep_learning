@@ -94,18 +94,9 @@ def draw_accuracy_comparison_plot(
     plot_width = width - left - right
     plot_height = height - top - bottom
 
-    # Find y-range
-    all_vals = []
-    for _, values in series:
-        all_vals.extend(values)
-
-    y_min = min(all_vals)
-    y_max = max(all_vals)
-
-    # Add padding
-    pad = 0.05 * (y_max - y_min) if y_max > y_min else 0.02
-    y_min = max(0.0, y_min - pad)
-    y_max = min(1.0, y_max + pad)   # assumes accuracy is in [0, 1]
+    # Fixed accuracy range
+    y_min = 0.0
+    y_max = 1.0
 
     def x_to_px(epoch: int) -> float:
         return left + (epoch - 1) / (n_epochs - 1) * plot_width
@@ -122,15 +113,16 @@ def draw_accuracy_comparison_plot(
     draw.text((width // 2 - 20, height - 30), "Epoch", fill="black", font=font)
     draw.text((15, height // 2), "Accuracy", fill="black", font=font)
 
-    # Y ticks
-    n_y_ticks = 5
-    for i in range(n_y_ticks + 1):
-        frac = i / n_y_ticks
-        y_val = y_min + frac * (y_max - y_min)
+    # Y ticks at fixed intervals (0.0, 0.2, ..., 1.0)
+    tick_step = 0.2
+    y_val = y_min
+    while y_val <= y_max + 1e-6:  # small epsilon for float safety
         y = y_to_px(y_val)
 
         draw.line((left, y, width - right, y), fill=(220, 220, 220), width=1)
-        draw.text((30, y - 7), f"{y_val:.2f}", fill="black", font=font)
+        draw.text((30, y - 7), f"{y_val:.1f}", fill="black", font=font)
+
+        y_val += tick_step
 
     # X ticks
     for epoch in range(1, n_epochs + 1):
@@ -406,11 +398,11 @@ def train_model(epochs: int,
         val_accuracy.append(validate_accuracy)
 
         print(f"Training accuracy: {training_accuracy:.4f} | Validation accuracy: {validate_accuracy:.4f}")
-
+        
         if val_accuracy[-1] > best_val_accuracy - min_delta:
             best_val_accuracy = val_accuracy[-1]
             epochs_no_improve = 0
-            #torch.save(net.state_dict(), f"best_model_{regularise_flag}_task1.pt")
+            torch.save(net.state_dict(), f"best_model_{regularise_flag}_task1.pt")
         else:
             epochs_no_improve += 1
 
@@ -518,10 +510,10 @@ if __name__ == '__main__':
     epochs = 100 
     patience = 3 # for early stopping, if validation loss does not improve for this many epochs, stop training
 
-    learning_rate = 0.05 # for SGD
-    momentum = 0.9 # for SGD
+    learning_rate = 0.01 # for SGD - Got value from grid_searc
+    momentum = 0.85 # for SGD - Got value from grid_search
 
-    run_grid_search = True
+    run_grid_search = False
 
     device, use_cuda = config_cuda()
     train_loader, val_loader, n_classes = make_dataloaders(batch_size, use_cuda)
@@ -557,7 +549,7 @@ if __name__ == '__main__':
     # ------- Train regularised model -------
 
     # hyperparams
-    w_decay = 5e-4 # best params
+    w_decay = 1e-3 # best params
     drop_prob = 0.05 # best params
     drop_block_size = 3 # best params
     regularise_flag = "regularisation"
@@ -580,6 +572,6 @@ if __name__ == '__main__':
     print(f"Best model saved to best_model_{regularise_flag}_task1.pt")
 
 
-    #lines = [("unregularised train accuracy", train_accuracy_unreg),("unregularised val accuracy", val_accuracy_unreg),("regularised train accuracy", train_accuracy_reg),("regularised val accuracy", val_accuracy_reg)]
-    #print(lines)
-    #draw_accuracy_comparison_plot(lines, save_path="generalization_gap.png", title="Training vs Validation Accuracy Regularised vs Unregularised")
+    lines = [("unregularised train accuracy", train_accuracy_unreg),("unregularised val accuracy", val_accuracy_unreg),("regularised train accuracy", train_accuracy_reg),("regularised val accuracy", val_accuracy_reg)]
+    print(lines)
+    draw_accuracy_comparison_plot(lines, save_path="generalization_gap.png", title="Training vs Validation Accuracy Regularised vs Unregularised")
