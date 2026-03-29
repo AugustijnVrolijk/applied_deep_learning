@@ -410,7 +410,7 @@ def train_model(epochs: int,
         if val_accuracy[-1] > best_val_accuracy - min_delta:
             best_val_accuracy = val_accuracy[-1]
             epochs_no_improve = 0
-            torch.save(net.state_dict(), f"best_model_{regularise_flag}_task1.pt")
+            #torch.save(net.state_dict(), f"best_model_{regularise_flag}_task1.pt")
         else:
             epochs_no_improve += 1
 
@@ -425,33 +425,41 @@ def grid_search(
     use_cuda: bool,
     train_loader: DataLoader,
     val_loader: DataLoader,
-    learning_rate: float,
-    momentum: float,
     epochs: int = 40,   # shorter for search
     patience: int = 3 # shorter for search
 ):
     """
     Performs a grid search over DropBlock and weight decay hyperparameters.
 
+    inputs:
+        device (torch.device) which device to use
+        use_cuda (bool) true or false is cuda is being used
+        train_loader (DataLoader) dataset for training data
+        val_loader (DataLoader) dataset for validation data
+        epochs (int)
+        patience (int) number of runs to wait with no increase in validation accuracy before breaking early
+        
     Returns:
         best_config (dict)
         all_results (list of dict)
     """
 
+    learning_rate = [0.05, 0.01]
+    momentum = [0.9, 0.85, 0.95]
     drop_probs = [0.05, 0.1, 0.15]
     block_sizes = [1, 3, 5]
     weight_decays = [1e-4, 5e-4, 1e-3]
 
     results = []
-    total_runs = len(drop_probs) * len(block_sizes) * len(weight_decays)
+    total_runs = len(drop_probs) * len(block_sizes) * len(weight_decays) * len(learning_rate) * len(momentum)
     run_idx = 0
 
-    for drop_prob, block_size, w_decay in product(drop_probs, block_sizes, weight_decays):
+    for learning_rate, momentum, drop_prob, block_size, w_decay in product(learning_rate, momentum, drop_probs, block_sizes, weight_decays):
         run_idx += 1
 
         print("\n" + "="*50)
         print(f"Run {run_idx}/{total_runs}")
-        print(f"drop_prob={drop_prob}, block_size={block_size}, weight_decay={w_decay}")
+        print(f"learning_rate={learning_rate}, momentum={momentum}, drop_prob={drop_prob}, block_size={block_size}, weight_decay={w_decay}")
 
         # fresh model
         net = Net(drop_prob=drop_prob, drop_block_size=block_size).to(device)
@@ -467,7 +475,7 @@ def grid_search(
         final_val = val_accuracy[-1]
         gap = calculate_mean_gap(train_accuracy, val_accuracy)
 
-        result = {"drop_prob": drop_prob,"block_size": block_size,"weight_decay": w_decay,"best_val_accuracy": best_val,"final_val_accuracy": final_val,"mean_gap": gap}
+        result = {"drop_prob": drop_prob,"block_size": block_size,"weight_decay": w_decay,"learning_rate": learning_rate,"momentum": momentum,"best_val_accuracy": best_val,"final_val_accuracy": final_val,"mean_gap": gap}
 
         results.append(result)
 
@@ -476,12 +484,27 @@ def grid_search(
         print(f"Mean Gap: {gap:.4f}")
 
     # sort by best validation loss
-    results.sort(key=lambda x: x["best_val_accuracy"])
+    results.sort(key=lambda x: x["best_val_accuracy"], reverse=True)
 
     print("\n" + "="*50)
     print("TOP 5 CONFIGS:")
     for r in results[:5]:
         print(r)
+
+    with open("results.txt", "w") as f:
+
+        f.write("\nTOP 5 CONFIGS (sorted by best_val_accuracy):\n")
+        f.write("="*50 + "\n")
+
+        for r in results[:5]:
+            f.write(str(r) + "\n")
+
+        f.write("\n" + "="*50 + "\n")
+        f.write("ALL RESULTS (sorted by best_val_accuracy)\n")
+        f.write("="*50 + "\n")
+
+        for r in results:
+            f.write(str(r) + "\n")
 
     best_config = results[0]
     return best_config, results
@@ -498,13 +521,13 @@ if __name__ == '__main__':
     learning_rate = 0.05 # for SGD
     momentum = 0.9 # for SGD
 
-    run_grid_search = False
+    run_grid_search = True
 
     device, use_cuda = config_cuda()
     train_loader, val_loader, n_classes = make_dataloaders(batch_size, use_cuda)
     
     if run_grid_search:
-        best_config, all_results = grid_search(device,use_cuda,train_loader,val_loader,learning_rate,momentum)
+        best_config, all_results = grid_search(device,use_cuda,train_loader,val_loader)
         print("\nBest configuration found:")
         print(best_config)
         exit()
